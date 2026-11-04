@@ -12,6 +12,21 @@
     "external-redirect": "入力直後の通信が、別オリジンへリダイレクトされました。本文は確認していません。"
   });
   const KINDS = Object.freeze(["form", "fetch", "xhr", "beacon", "websocket", "network"]);
+  const REASON_ORDER = Object.freeze(["form-changed", "typing-transfer", "external-redirect", "network-after-input", "form-external", "insecure"]);
+  const BLOCKING_REASONS = Object.freeze(["form-changed", "typing-transfer", "insecure"]);
+  const SEVERITY_RANK = Object.freeze({FATAL: 0, CRITICAL: 1, WARNING: 2});
+  function reasonSeverity(reason) {
+    if (reason === "form-changed") return "FATAL";
+    if (["typing-transfer", "network-after-input", "external-redirect"].includes(reason)) return "CRITICAL";
+    return "WARNING";
+  }
+  function incidentReasons(incident) {
+    const supplied = Array.isArray(incident?.reasons) ? incident.reasons.slice(0, REASON_ORDER.length) : [];
+    return REASON_ORDER.filter(reason => reason === incident?.reason || supplied.includes(reason));
+  }
+  function incidentSeverity(incident) {
+    return incidentReasons(incident).map(reasonSeverity).sort((a, b) => SEVERITY_RANK[a] - SEVERITY_RANK[b])[0] || "WARNING";
+  }
   function origin(raw, base) {
     if (typeof raw !== "string" || raw.length > 65536) return null;
     try {
@@ -48,23 +63,28 @@
     if (!source || !destination || !fields.length || allowed(settings.allowlist, source, destination)) return null;
     const external = source !== destination;
     const insecure = destination.startsWith("http:");
-    let reason, severity;
-    if (insecure && (meta.kind === "form" || meta.recentInput)) [reason, severity] = ["insecure", "high"];
-    else if (meta.changed && meta.kind === "form") [reason, severity] = ["form-changed", "high"];
-    else if (external && meta.recentInput && !meta.userSubmitted && meta.kind !== "network") [reason, severity] = ["typing-transfer", "high"];
-    else if (external && meta.kind === "form") [reason, severity] = ["form-external", "medium"];
-    else if (external && meta.recentInput && !meta.userSubmitted && meta.kind === "network") [reason, severity] = ["network-after-input", "medium"];
-    else return null;
-    return {source, destination, categories: fields, kind: KINDS.includes(meta.kind) ? meta.kind : "network", reason, severity,
-      blocked: settings.mode === "block" && severity === "high" && meta.attempt === true && meta.kind !== "network"};
+    const matches = [];
+    // Evaluate each behavior independently. HTTP must not hide a destination change or an early transfer.
+    if (insecure && (meta.kind === "form" || meta.recentInput)) matches.push("insecure");
+    if (meta.changed && meta.kind === "form") matches.push("form-changed");
+    if (external && meta.recentInput && !meta.userSubmitted && meta.kind !== "network" && meta.kind !== "form") matches.push("typing-transfer");
+    if (external && meta.kind === "form") matches.push("form-external");
+    if (external && meta.recentInput && !meta.userSubmitted && meta.kind === "network") matches.push(meta.redirect ? "external-redirect" : "network-after-input");
+    const reasons = incidentReasons({reasons: matches});
+    if (!reasons.length) return null;
+    const severity = incidentSeverity({reasons});
+    return {source, destination, categories: fields, kind: KINDS.includes(meta.kind) ? meta.kind : "network", reason: reasons[0], reasons, severity,
+      blocked: settings.mode === "block" && reasons.some(reason => BLOCKING_REASONS.includes(reason)) && meta.attempt === true && meta.kind !== "network"};
   }
   function sanitizeIncident(raw, source) {
     if (!raw || !Object.hasOwn(REASONS, raw.reason) || !KINDS.includes(raw.kind)) return null;
     const destination = origin(raw.destination);
     const fields = categories(raw.categories);
     if (!destination || !fields.length || !origin(source)) return null;
-    return {source: origin(source), destination, categories: fields, kind: raw.kind, reason: raw.reason,
-      severity: ["insecure", "form-changed", "typing-transfer"].includes(raw.reason) ? "high" : "medium", blocked: raw.blocked === true && raw.kind !== "network"};
+    const reasons = incidentReasons(raw);
+    const severity = incidentSeverity({reasons});
+    return {source: origin(source), destination, categories: fields, kind: raw.kind, reason: reasons[0], reasons,
+      severity, blocked: raw.blocked === true && raw.kind !== "network" && reasons.some(reason => BLOCKING_REASONS.includes(reason))};
   }
   function sanitizeSettings(raw = {}) {
     if (!raw || typeof raw !== "object") raw = {};
@@ -74,7 +94,7 @@
       return source && destination ? [{source, destination}] : [];
     }) : []};
   }
-  const api = Object.freeze({CATEGORIES, REASONS, KINDS, origin, categories, fieldCategory, allowed, analyze, sanitizeIncident, sanitizeSettings});
+  const api = Object.freeze({CATEGORIES, REASONS, KINDS, SEVERITY_RANK, origin, categories, fieldCategory, allowed, analyze, reasonSeverity, incidentSeverity, incidentReasons, sanitizeIncident, sanitizeSettings});
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else Object.defineProperty(globalThis, "InputDefenderCore", {value: api, configurable: false, writable: false});
 })();
@@ -84,6 +104,16 @@
 (() => {
   "use strict";
   globalThis.InputDefenderUI = Object.freeze({
+    levels: Object.freeze({WARNING: "WARNING · 注意", CRITICAL: "CRITICAL · 重大", FATAL: "FATAL · 最優先"}),
+    colors: Object.freeze({WARNING: "#986300", CRITICAL: "#b63232", FATAL: "#7634a0"}),
+    labels: Object.freeze({
+      "form-changed": "フォーム送信先の変更",
+      "typing-transfer": "入力直後の外部送信（自動送信の疑い）",
+      "external-redirect": "外部への転送",
+      "network-after-input": "入力直後の外部通信",
+      "form-external": "フォームの外部送信先",
+      "insecure": "暗号化されない通信（HTTP）"
+    }),
     reasons: Object.freeze({
       "form-external": "個人情報用フォームに、表示中のページとは別の送信先が指定されています。正規の決済や連携でも起こります。",
       "form-changed": "個人情報用フォームの送信先が、ページの読み込み後に変更されました。",
@@ -103,44 +133,144 @@
   const Core = globalThis.InputDefenderCore;
   const channel = "input-defender:v1";
   let lastActivity = 0;
-  let banner;
-  let lastBanner = 0;
+  const UI = globalThis.InputDefenderUI;
+  const notices = new Map();
+  let noticeSequence = 0, omittedCount = 0;
+  let stack, stackShadow, stackList, stackCount, omittedNote;
   let budgetStart = Date.now(), messageCount = 0;
   const source = Core.origin(location.origin);
   const send = message => chrome.runtime.sendMessage(message).catch(() => null);
   function configure(settings) { window.postMessage({channel, type: "config", settings: Core.sanitizeSettings(settings)}, "*"); }
-  function showBanner(incident) {
-    if (window !== window.top || incident.severity !== "high" || Date.now() - lastBanner < 5000) return;
-    lastBanner = Date.now();
-    banner?.remove();
-    banner = document.createElement("div");
-    banner.setAttribute("data-input-defender-notice", "");
-    const shadow = banner.attachShadow({mode: "closed"});
+  function ensureStack() {
+    if (stack?.isConnected) return;
+    stack = document.createElement("div");
+    stack.setAttribute("data-input-defender-notice", "");
+    const shadow = stack.attachShadow({mode: "closed"});
+    stackShadow = shadow;
     const style = document.createElement("style");
-    style.textContent = `:host{all:initial!important;position:fixed!important;right:12px!important;bottom:12px!important;z-index:2147483647!important;width:min(400px,calc(100vw - 24px))!important}*{box-sizing:border-box}.notice{padding:14px 16px;color:#263c32;background:#fff;border:1px solid #dcc4a3;border-left:4px solid #ad513e;border-radius:6px;box-shadow:0 4px 20px #0002;font:12px/1.7 system-ui,sans-serif;max-height:calc(100dvh - 24px);overflow:auto}strong{display:block;font-size:13px;color:#973f2f;margin-bottom:6px}p{margin:6px 0;overflow-wrap:anywhere}.small{font-size:11px;color:#5e6d63}.next{font-weight:600}button{background:#fff;border:1px solid #bfcbbf;border-radius:5px;color:#355440;padding:5px 10px;min-height:30px;font:11px/1.6 system-ui,sans-serif;cursor:pointer}button:focus-visible{outline:2px solid #285b40;outline-offset:2px}`;
-    const box = document.createElement("div");
-    box.className = "notice";
-    box.setAttribute("role", "alert");
-    const title = document.createElement("strong");
-    title.textContent = incident.blocked ? "Input Defender · 送信処理を停止しました" : "Input Defender · 確認が必要な動きを検知";
-    const reason = document.createElement("p");
-    reason.textContent = globalThis.InputDefenderUI.reasons[incident.reason];
-    const destination = document.createElement("p");
-    destination.textContent = `送信先: ${incident.destination}`;
-    const note = document.createElement("p");
-    note.className = "small";
-    note.textContent = "入力内容は確認していません。漏えいや悪意を断定する警告ではありません。";
-    const next = document.createElement("p");
-    next.className = "next";
-    next.textContent = "拡張アイコンを開き、「検知記録」で送信先を確認してください。";
-    const close = document.createElement("button");
-    close.textContent = "警告を閉じる";
-    close.title = "この警告だけを閉じます。監視は続きます。";
-    close.addEventListener("click", () => banner?.remove());
-    box.addEventListener("keydown", event => { if (event.key === "Escape") banner?.remove(); });
-    box.append(title, reason, destination, next, note, close);
+    style.textContent = `
+      :host{all:initial!important;position:fixed!important;right:12px!important;bottom:12px!important;z-index:2147483647!important;width:min(420px,calc(100vw - 24px))!important}
+      *{box-sizing:border-box}
+      .stack{display:flex;flex-direction:column;max-height:min(720px,calc(100dvh - 24px));background:#fff;border:1px solid #cbd5c9;border-radius:7px;box-shadow:0 4px 22px #0003;color:#273a30;font:12px/1.6 system-ui,sans-serif;overflow:hidden}
+      .header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #dfe5da;flex-shrink:0}
+      .header strong{font-size:12px}.header span{color:#596b5b;font-size:11px}
+      .list{min-height:0;overflow:auto;padding:9px;scrollbar-width:thin}
+      .notice{border:1px solid #dedfd5;border-left:4px solid #ba8b17;border-radius:5px;padding:10px;margin-bottom:8px;background:#fffdf3}
+      .notice:last-child{margin-bottom:0}
+      .notice.CRITICAL{border-left-color:#b63232;background:#fff7f7}
+      .notice.FATAL{border-left-color:#7634a0;background:#fcf8ff}
+      .row{display:flex;align-items:center;gap:8px}.level{font-size:10px;font-weight:750;color:#785200;background:#fff2c6;border-radius:3px;padding:2px 5px}
+      .CRITICAL .level{color:#a32929;background:#fde8e8}.FATAL .level{color:#6a268f;background:#f1e6fa}
+      .row button{margin-left:auto;min-width:28px;padding:1px 6px;font-size:16px}
+      h3{font-size:12px;line-height:1.6;margin:5px 0}
+      p{margin:5px 0;overflow-wrap:anywhere}.destination,.meta{font-size:11px;color:#526351}.outcome{font-size:11px;font-weight:650}
+      .footer{padding:7px 12px 10px;border-top:1px solid #dfe5da;flex-shrink:0;font-size:10px;color:#5b6b5d}.footer p{margin:3px 0}
+      button{background:#fff;border:1px solid #bfcbbf;border-radius:5px;color:#355440;min-height:28px;padding:4px 8px;font:11px/1.6 system-ui,sans-serif;cursor:pointer}
+      button:focus-visible{outline:2px solid #285b40;outline-offset:2px}
+    `;
+    const box = document.createElement("section");
+    box.className = "stack";
+    box.setAttribute("aria-label", "Input Defenderの検知通知");
+    const header = document.createElement("div");
+    header.className = "header";
+    const heading = document.createElement("strong");
+    heading.textContent = "Input Defender · 検知通知";
+    stackCount = document.createElement("span");
+    const clear = document.createElement("button");
+    clear.textContent = "すべて閉じる";
+    clear.title = "ページ内の通知だけを閉じます。監視と検知記録は残ります。";
+    clear.addEventListener("click", () => { notices.clear(); omittedCount = 0; stack.remove(); });
+    header.append(heading, stackCount, clear);
+    stackList = document.createElement("div");
+    stackList.className = "list";
+    const footer = document.createElement("div");
+    footer.className = "footer";
+    const instruction = document.createElement("p");
+    instruction.textContent = "詳細は拡張アイコンの「検知記録」へ。閉じても監視は続きます。";
+    const limitation = document.createElement("p");
+    limitation.textContent = "深刻度は挙動からの推定です。FATALでも漏えいの確定ではありません。入力内容は確認していません。";
+    omittedNote = document.createElement("p");
+    footer.append(instruction, limitation, omittedNote);
+    box.append(header, stackList, footer);
     shadow.append(style, box);
-    (document.body || document.documentElement)?.append(banner);
+    (document.body || document.documentElement)?.append(stack);
+  }
+  function sortedNotices() {
+    return [...notices.values()].sort((a, b) => Core.SEVERITY_RANK[a.level] - Core.SEVERITY_RANK[b.level] || b.sequence - a.sequence);
+  }
+  function renderNotices(jumpToTop = false) {
+    if (!notices.size) { stack?.remove(); return; }
+    ensureStack();
+    const scroll = stackList.scrollTop;
+    const focusedKey = stackShadow.activeElement?.getAttribute("data-close-key");
+    const rows = [];
+    for (const notice of sortedNotices()) {
+      const card = document.createElement("article");
+      card.className = `notice ${notice.level}`;
+      card.setAttribute("role", "alert");
+      card.setAttribute("aria-label", `${notice.level} · ${UI.labels[notice.reason]}`);
+      const row = document.createElement("div");
+      row.className = "row";
+      const level = document.createElement("span");
+      level.className = "level";
+      level.textContent = UI.levels[notice.level];
+      const count = document.createElement("span");
+      count.className = "meta";
+      count.textContent = notice.count > 1 ? `通知受信 ${notice.count}回` : "";
+      const close = document.createElement("button");
+      close.textContent = "×";
+      close.setAttribute("data-close-key", notice.key);
+      close.setAttribute("aria-label", `${UI.labels[notice.reason]}の通知を閉じる`);
+      close.title = "この通知だけを閉じます。監視と検知記録は残ります。";
+      close.addEventListener("click", () => {
+        notices.delete(notice.key);
+        renderNotices();
+        stackList?.querySelector("button")?.focus({preventScroll: true});
+      });
+      row.append(level, count, close);
+      const label = document.createElement("h3");
+      label.textContent = UI.labels[notice.reason];
+      const description = document.createElement("p");
+      description.textContent = UI.reasons[notice.reason];
+      const destination = document.createElement("p");
+      destination.className = "destination";
+      destination.textContent = `送信先: ${notice.destination}`;
+      card.append(row, label, description, destination);
+      if (notice.source !== source) {
+        const frame = document.createElement("p");
+        frame.className = "destination";
+        frame.textContent = `元ページ: ${notice.source}`;
+        card.append(frame);
+      }
+      const outcome = document.createElement("p");
+      outcome.className = "outcome";
+      outcome.textContent = notice.blocked ? "対応する送信処理に停止記録があります。" : notice.kind === "network" ? "通信の観測のみ・停止対象外" : "送信の停止は行っていません。";
+      card.append(outcome);
+      rows.push(card);
+    }
+    stackList.replaceChildren(...rows);
+    stackCount.textContent = `${notices.size}件`;
+    omittedNote.textContent = omittedCount ? `表示上限20件のため省略した通知: ${omittedCount}件。検知記録から確認できます。` : "";
+    if (focusedKey) [...stackList.querySelectorAll("button")].find(button => button.getAttribute("data-close-key") === focusedKey)?.focus({preventScroll: true});
+    stackList.scrollTop = jumpToTop ? 0 : scroll;
+  }
+  function showBanner(incident) {
+    if (window !== window.top) return;
+    const previousPriority = sortedNotices()[0]?.level;
+    let newUrgent = false;
+    for (const reason of Core.incidentReasons(incident)) {
+      const key = `${reason}|${incident.source}|${incident.destination}`;
+      const previous = notices.get(key);
+      const level = Core.reasonSeverity(reason);
+      const blocked = incident.blocked || previous?.blocked === true;
+      notices.set(key, {key, reason, level, source: incident.source, destination: incident.destination,
+        kind: incident.blocked || !previous?.blocked ? incident.kind : previous.kind,
+        blocked, count: (previous?.count || 0) + 1, sequence: previous?.sequence || ++noticeSequence});
+      if (!previous && (level === "FATAL" || !previousPriority || Core.SEVERITY_RANK[level] < Core.SEVERITY_RANK[previousPriority])) newUrgent = true;
+    }
+    // Keep the highest-priority cards visible and bound page-local metadata.
+    for (const entry of sortedNotices().slice(20)) { notices.delete(entry.key); omittedCount++; }
+    renderNotices(newUrgent);
   }
   window.addEventListener("message", async event => {
     if (event.source !== window || event.data?.channel !== channel) return;

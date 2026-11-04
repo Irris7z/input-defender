@@ -28,7 +28,9 @@ h3 { font-size: 12px; font-weight: 650; }
 .origin { font-size: 11px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; max-height: 34px; overflow: auto; }
 .status { display: flex; align-items: center; gap: 7px; color: var(--accent); margin-top: 5px; }
 .status-symbol { font-size: 9px; }
-.status.alert { color: #973f2f; }
+.status.WARNING { color: #986300; }
+.status.CRITICAL { color: #b63232; }
+.status.FATAL { color: #7634a0; }
 .status.unavailable { color: #5e665f; }
 #status-note { font-size: 11px; margin-top: 4px; color: #4f5e53; }
 .mode-panel { padding: 9px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -57,13 +59,22 @@ select { padding: 4px 24px 4px 8px; border: 1px solid #bfcbbf; border-radius: 5p
 .empty { border: 1px dashed #cbd6c8; border-radius: 6px; padding: 20px 12px; color: var(--muted); text-align: center; font-size: 11px; }
 .empty strong { display: block; color: #405746; font-size: 12px; margin-bottom: 4px; }
 .event { padding: 11px 12px; border: 1px solid var(--border); border-left: 3px solid #be9144; border-radius: 6px; margin-bottom: 9px; background: #fff; }
-.event.high { border-left-color: #b95948; }
+.event.WARNING { border-left-color: #ba8b17; }
+.event.CRITICAL { border-left-color: #b63232; }
+.event.FATAL { border-left-color: #7634a0; }
 .event-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .risk { font-size: 10px; font-weight: 650; color: #835d17; background: #fff3d8; padding: 1px 5px; border-radius: 3px; }
-.risk.high { color: #973f2f; background: #fbe9e4; }
+.risk.WARNING { color: #785200; background: #fff2c6; }
+.risk.CRITICAL { color: #a32929; background: #fde8e8; }
+.risk.FATAL { color: #6a268f; background: #f1e6fa; }
 .kind, .time { font-size: 10px; color: var(--muted); }
 .time { margin-left: auto; font-variant-numeric: tabular-nums; }
-.event-reason { font-size: 12px; line-height: 1.7; margin: 8px 0; }
+.event-reasons { margin: 8px 0; padding-left: 17px; }
+.event-reason { font-size: 11px; line-height: 1.7; margin: 7px 0; }
+.reason-label { display: block; font-size: 11px; font-weight: 650; }
+.event-reason.WARNING::marker { color: #986300; }
+.event-reason.CRITICAL::marker { color: #b63232; }
+.event-reason.FATAL::marker { color: #7634a0; }
 .destination, .source { font-size: 11px; overflow-wrap: anywhere; line-height: 1.6; }
 .source { color: var(--muted); }
 .tags { font-size: 10px; color: var(--muted); margin-top: 6px; }

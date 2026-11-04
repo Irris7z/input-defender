@@ -12,6 +12,21 @@
     "external-redirect": "入力直後の通信が、別オリジンへリダイレクトされました。本文は確認していません。"
   });
   const KINDS = Object.freeze(["form", "fetch", "xhr", "beacon", "websocket", "network"]);
+  const REASON_ORDER = Object.freeze(["form-changed", "typing-transfer", "external-redirect", "network-after-input", "form-external", "insecure"]);
+  const BLOCKING_REASONS = Object.freeze(["form-changed", "typing-transfer", "insecure"]);
+  const SEVERITY_RANK = Object.freeze({FATAL: 0, CRITICAL: 1, WARNING: 2});
+  function reasonSeverity(reason) {
+    if (reason === "form-changed") return "FATAL";
+    if (["typing-transfer", "network-after-input", "external-redirect"].includes(reason)) return "CRITICAL";
+    return "WARNING";
+  }
+  function incidentReasons(incident) {
+    const supplied = Array.isArray(incident?.reasons) ? incident.reasons.slice(0, REASON_ORDER.length) : [];
+    return REASON_ORDER.filter(reason => reason === incident?.reason || supplied.includes(reason));
+  }
+  function incidentSeverity(incident) {
+    return incidentReasons(incident).map(reasonSeverity).sort((a, b) => SEVERITY_RANK[a] - SEVERITY_RANK[b])[0] || "WARNING";
+  }
   function origin(raw, base) {
     if (typeof raw !== "string" || raw.length > 65536) return null;
     try {
@@ -48,23 +63,28 @@
     if (!source || !destination || !fields.length || allowed(settings.allowlist, source, destination)) return null;
     const external = source !== destination;
     const insecure = destination.startsWith("http:");
-    let reason, severity;
-    if (insecure && (meta.kind === "form" || meta.recentInput)) [reason, severity] = ["insecure", "high"];
-    else if (meta.changed && meta.kind === "form") [reason, severity] = ["form-changed", "high"];
-    else if (external && meta.recentInput && !meta.userSubmitted && meta.kind !== "network") [reason, severity] = ["typing-transfer", "high"];
-    else if (external && meta.kind === "form") [reason, severity] = ["form-external", "medium"];
-    else if (external && meta.recentInput && !meta.userSubmitted && meta.kind === "network") [reason, severity] = ["network-after-input", "medium"];
-    else return null;
-    return {source, destination, categories: fields, kind: KINDS.includes(meta.kind) ? meta.kind : "network", reason, severity,
-      blocked: settings.mode === "block" && severity === "high" && meta.attempt === true && meta.kind !== "network"};
+    const matches = [];
+    // Evaluate each behavior independently. HTTP must not hide a destination change or an early transfer.
+    if (insecure && (meta.kind === "form" || meta.recentInput)) matches.push("insecure");
+    if (meta.changed && meta.kind === "form") matches.push("form-changed");
+    if (external && meta.recentInput && !meta.userSubmitted && meta.kind !== "network" && meta.kind !== "form") matches.push("typing-transfer");
+    if (external && meta.kind === "form") matches.push("form-external");
+    if (external && meta.recentInput && !meta.userSubmitted && meta.kind === "network") matches.push(meta.redirect ? "external-redirect" : "network-after-input");
+    const reasons = incidentReasons({reasons: matches});
+    if (!reasons.length) return null;
+    const severity = incidentSeverity({reasons});
+    return {source, destination, categories: fields, kind: KINDS.includes(meta.kind) ? meta.kind : "network", reason: reasons[0], reasons, severity,
+      blocked: settings.mode === "block" && reasons.some(reason => BLOCKING_REASONS.includes(reason)) && meta.attempt === true && meta.kind !== "network"};
   }
   function sanitizeIncident(raw, source) {
     if (!raw || !Object.hasOwn(REASONS, raw.reason) || !KINDS.includes(raw.kind)) return null;
     const destination = origin(raw.destination);
     const fields = categories(raw.categories);
     if (!destination || !fields.length || !origin(source)) return null;
-    return {source: origin(source), destination, categories: fields, kind: raw.kind, reason: raw.reason,
-      severity: ["insecure", "form-changed", "typing-transfer"].includes(raw.reason) ? "high" : "medium", blocked: raw.blocked === true && raw.kind !== "network"};
+    const reasons = incidentReasons(raw);
+    const severity = incidentSeverity({reasons});
+    return {source: origin(source), destination, categories: fields, kind: raw.kind, reason: reasons[0], reasons,
+      severity, blocked: raw.blocked === true && raw.kind !== "network" && reasons.some(reason => BLOCKING_REASONS.includes(reason))};
   }
   function sanitizeSettings(raw = {}) {
     if (!raw || typeof raw !== "object") raw = {};
@@ -74,7 +94,7 @@
       return source && destination ? [{source, destination}] : [];
     }) : []};
   }
-  const api = Object.freeze({CATEGORIES, REASONS, KINDS, origin, categories, fieldCategory, allowed, analyze, sanitizeIncident, sanitizeSettings});
+  const api = Object.freeze({CATEGORIES, REASONS, KINDS, SEVERITY_RANK, origin, categories, fieldCategory, allowed, analyze, reasonSeverity, incidentSeverity, incidentReasons, sanitizeIncident, sanitizeSettings});
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else Object.defineProperty(globalThis, "InputDefenderCore", {value: api, configurable: false, writable: false});
 })();
@@ -108,7 +128,7 @@
   }
   function report(incident) {
     if (!incident) return false;
-    const key = `${incident.reason}|${incident.kind}|${incident.destination}|${incident.blocked}`;
+    const key = `${Core.incidentReasons(incident).join(",")}|${incident.kind}|${incident.destination}|${incident.blocked}`;
     if (now() - (recentReports.get(key) || 0) > 3000) {
       if (recentReports.size > 200) recentReports.clear();
       recentReports.set(key, now());
@@ -181,7 +201,7 @@
     const overridden = submitter instanceof Element ? submitter.getAttribute("formaction") : null;
     const action = overridden ?? form.getAttribute("action");
     const destination = Core.origin(action || location.href, document.baseURI);
-    const target = submitter || form;
+    const target = overridden === null ? form : submitter;
     const hadBaseline = formOrigins.has(target);
     const changed = hadBaseline && formOrigins.get(target) !== destination;
     // Keep the first destination as a baseline, including after mutation delivery.

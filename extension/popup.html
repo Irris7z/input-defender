@@ -10,7 +10,7 @@
   <script defer src="popup.js"></script>
 </head>
 <body>
-  <header class="app-header"><div class="brand"><img src="icons/48.png" width="24" height="24" alt=""><h1>Input Defender</h1></div><span class="version">v0.1</span></header>
+  <header class="app-header"><div class="brand"><img src="icons/48.png" width="24" height="24" alt=""><h1>Input Defender</h1></div><span class="version">v0.1.1</span></header>
   <section class="page-context" aria-label="現在のページ">
     <p id="site" class="origin">ページを確認中</p>
     <div class="status" aria-live="polite"><span class="status-symbol" aria-hidden="true">●</span><h2 id="status-label">監視状態を確認中</h2></div>
@@ -20,8 +20,8 @@
   <main id="workspace">
     <section id="records-panel" class="panel" aria-labelledby="records-tab" role="tabpanel">
       <div class="section-title"><h2>このタブの記録 <span id="event-count">0</span><span class="count-unit">件</span></h2><button id="clear" class="button quiet" disabled title="削除する記録はありません">記録を削除…</button></div>
-      <div class="list-tools"><p class="caption">送信先 <span id="destination-count">0</span>件</p><label class="filter-label" for="event-filter">表示<select id="event-filter"><option value="all">すべて</option><option value="high">要注意のみ</option><option value="blocked">停止した操作のみ</option></select></label></div>
-      <p class="caption" id="record-note">入力欄の種類とサイトの挙動から推定しています。</p>
+      <div class="list-tools"><p class="caption">送信先 <span id="destination-count">0</span>件</p><label class="filter-label" for="event-filter">表示<select id="event-filter"><option value="all">すべて</option><option value="critical">CRITICAL以上</option><option value="fatal">FATALのみ</option><option value="blocked">停止した操作のみ</option></select></label></div>
+      <p class="caption" id="record-note">深刻度は挙動からの推定です。FATALでも漏えいの確定ではありません。</p>
       <div id="clear-confirm" class="confirm-box" role="group" aria-labelledby="clear-title" hidden><h3 id="clear-title">このタブの記録を削除しますか？</h3><p id="clear-impact"></p><div class="button-row"><button id="clear-yes" class="button danger">記録だけを削除</button><button id="clear-cancel" class="button secondary">キャンセル</button></div></div>
       <div id="events" aria-live="polite" aria-describedby="record-note"></div>
     </section>

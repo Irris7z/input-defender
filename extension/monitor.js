@@ -26,7 +26,7 @@
   }
   function report(incident) {
     if (!incident) return false;
-    const key = `${incident.reason}|${incident.kind}|${incident.destination}|${incident.blocked}`;
+    const key = `${Core.incidentReasons(incident).join(",")}|${incident.kind}|${incident.destination}|${incident.blocked}`;
     if (now() - (recentReports.get(key) || 0) > 3000) {
       if (recentReports.size > 200) recentReports.clear();
       recentReports.set(key, now());
@@ -99,7 +99,7 @@
     const overridden = submitter instanceof Element ? submitter.getAttribute("formaction") : null;
     const action = overridden ?? form.getAttribute("action");
     const destination = Core.origin(action || location.href, document.baseURI);
-    const target = submitter || form;
+    const target = overridden === null ? form : submitter;
     const hadBaseline = formOrigins.has(target);
     const changed = hadBaseline && formOrigins.get(target) !== destination;
     // Keep the first destination as a baseline, including after mutation delivery.

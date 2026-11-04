@@ -2,6 +2,16 @@
 (() => {
   "use strict";
   globalThis.InputDefenderUI = Object.freeze({
+    levels: Object.freeze({WARNING: "WARNING · 注意", CRITICAL: "CRITICAL · 重大", FATAL: "FATAL · 最優先"}),
+    colors: Object.freeze({WARNING: "#986300", CRITICAL: "#b63232", FATAL: "#7634a0"}),
+    labels: Object.freeze({
+      "form-changed": "フォーム送信先の変更",
+      "typing-transfer": "入力直後の外部送信（自動送信の疑い）",
+      "external-redirect": "外部への転送",
+      "network-after-input": "入力直後の外部通信",
+      "form-external": "フォームの外部送信先",
+      "insecure": "暗号化されない通信（HTTP）"
+    }),
     reasons: Object.freeze({
       "form-external": "個人情報用フォームに、表示中のページとは別の送信先が指定されています。正規の決済や連携でも起こります。",
       "form-changed": "個人情報用フォームの送信先が、ページの読み込み後に変更されました。",

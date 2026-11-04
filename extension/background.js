@@ -26,16 +26,17 @@ async function save(tabId, state) {
   await chrome.storage.session.set({[tabKey(tabId)]: state});
   const count = state.events.length;
   await chrome.action.setBadgeText({tabId, text: count ? String(count) : ""});
-  await chrome.action.setBadgeBackgroundColor({tabId, color: state.events.some(e => e.severity === "high") ? "#a6412e" : "#8a6424"});
+  const level = state.events.map(Core.incidentSeverity).sort((a, b) => Core.SEVERITY_RANK[a] - Core.SEVERITY_RANK[b])[0] || "WARNING";
+  await chrome.action.setBadgeBackgroundColor({tabId, color: {WARNING: "#986300", CRITICAL: "#b63232", FATAL: "#7634a0"}[level]});
 }
 async function record(tabId, state, incident, config) {
   if (Core.allowed(config.allowlist, incident.source, incident.destination)) return;
   const timestamp = Date.now();
-  if (state.events.some(e => e.source === incident.source && e.destination === incident.destination && e.reason === incident.reason && e.kind === incident.kind && e.blocked === incident.blocked && timestamp - e.time < 5000)) return;
+  if (state.events.some(e => e.source === incident.source && e.destination === incident.destination && Core.incidentReasons(e).join(",") === Core.incidentReasons(incident).join(",") && e.kind === incident.kind && e.blocked === incident.blocked && timestamp - e.time < 5000)) return;
   state.events.unshift({...incident, time: timestamp});
   state.events = state.events.slice(0, 100);
   await save(tabId, state);
-  if (incident.severity === "high") chrome.tabs.sendMessage(tabId, {type: "alert", incident}, {frameId: 0}).catch(() => {});
+  chrome.tabs.sendMessage(tabId, {type: "alert", incident}, {frameId: 0}).catch(() => {});
 }
 async function handle(message, sender) {
   await initialized;
@@ -114,9 +115,8 @@ function observeRequest(details, redirect = false) {
     const frame = state.frames[frameId];
     if (!frame || frame.source !== initiator || Date.now() - frame.lastInput > 5000) return;
     const config = await settings();
-    let incident = Core.analyze({source: initiator, destination, kind: "network", categories: frame.categories,
-      recentInput: true, userSubmitted: Date.now() - frame.lastSubmit <= 1500}, config);
-    if (incident && redirect && initiator !== destination) incident = {...incident, reason: "external-redirect", severity: "medium"};
+    const incident = Core.analyze({source: initiator, destination, kind: "network", categories: frame.categories,
+      recentInput: true, userSubmitted: Date.now() - frame.lastSubmit <= 1500, redirect}, config);
     if (incident) await record(tabId, state, incident, config);
   }).catch(() => {});
 }

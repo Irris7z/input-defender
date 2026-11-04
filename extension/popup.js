@@ -136,7 +136,7 @@ function renderEvents(force = false) {
   const root = $("events");
   if (!force && (root.querySelector(".confirm-box") || signature === renderedEvents)) return;
   renderedEvents = signature;
-  const events = currentEvents.filter(event => filter === "high" ? event.severity === "high" : filter === "blocked" ? event.blocked : true);
+  const events = currentEvents.filter(event => filter === "critical" ? Core.incidentSeverity(event) !== "WARNING" : filter === "fatal" ? Core.incidentSeverity(event) === "FATAL" : filter === "blocked" ? event.blocked : true);
   root.replaceChildren();
   if (!events.length) {
     const empty = element("div", "empty");
@@ -145,11 +145,18 @@ function renderEvents(force = false) {
     root.append(empty);
   }
   for (const event of events) {
-    const card = element("article", `event ${event.severity}`);
+    const level = Core.incidentSeverity(event);
+    const card = element("article", `event ${level}`);
     const head = element("div", "event-head");
-    head.append(element("span", `risk ${event.severity}`, event.severity === "high" ? "要注意" : "確認推奨"), element("span", "kind", UI.kinds[event.kind]),
+    head.append(element("span", `risk ${level}`, UI.levels[level]), element("span", "kind", UI.kinds[event.kind]),
       element("time", "time", new Date(event.time).toLocaleTimeString("ja-JP", {hour: "2-digit", minute: "2-digit", second: "2-digit"})));
-    card.append(head, element("p", "event-reason", UI.reasons[event.reason]), element("div", "destination", `送信先: ${event.destination}`));
+    const reasons = element("ul", "event-reasons");
+    for (const reason of Core.incidentReasons(event)) {
+      const row = element("li", `event-reason ${Core.reasonSeverity(reason)}`);
+      row.append(element("strong", "reason-label", UI.labels[reason]), element("p", "", UI.reasons[reason]));
+      reasons.append(row);
+    }
+    card.append(head, reasons, element("div", "destination", `送信先: ${event.destination}`));
     if (event.source !== activeUrl) card.append(element("div", "source", `ページ内の元ページ: ${event.source}`));
     card.append(element("div", "tags", `入力欄の種類: ${event.categories.map(c => Core.CATEGORIES[c]).join(" / ")}`));
     const bottom = element("div", "event-bottom");
@@ -177,7 +184,8 @@ async function refresh() {
   $("event-count").textContent = String(currentEvents.length);
   $("destination-count").textContent = String(new Set(currentEvents.map(e => e.destination)).size);
   const status = document.querySelector(".status");
-  status.className = `status${!state.monitoring ? " unavailable" : currentEvents.length ? " alert" : ""}`;
+  const highest = currentEvents.map(Core.incidentSeverity).sort((a, b) => Core.SEVERITY_RANK[a] - Core.SEVERITY_RANK[b])[0];
+  status.className = `status${!state.monitoring ? " unavailable" : highest ? ` ${highest}` : ""}`;
   $("status-label").textContent = !state.monitoring ? "このページは監視できていません" : currentEvents.length ? "確認が必要な記録があります" : "監視中・検知記録なし";
   $("status-note").textContent = !state.monitoring
     ? "通常のWebページを開き、再読み込みしてください。Chromeの設定画面などは監視できません。"

