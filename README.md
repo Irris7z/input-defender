@@ -28,6 +28,58 @@
 
 `fetch`、XHR、Beacon、WebSocket、フォームの送信をページ側で監視します。HTTP(S)の各フレームが対象です。WebSocketはHTTP(S)とのプロトコル差だけでは別オリジンとみなさず、ホスト・ポートを比較します。サブドメインや別ポートは別オリジンとして扱います。
 
+## ロジックの構成図
+
+ページ側の送信前監視と、Chrome側の通信観測を組み合わせます。図の矢印で渡すのは、欄の種類・操作タイミング・送信先・検知理由などのメタデータだけです。
+
+```mermaid
+flowchart TB
+    subgraph page["サイト側：MAIN world"]
+        fields["入力欄の属性・入力イベント<br/>値・入力文字は取得しない"]
+        api["送信API・フォーム送信先<br/>fetch / XHR / Beacon / WebSocket"]
+        monitor["monitor.js + core.js<br/>入力の種類・タイミングと<br/>送信先から複数の理由を判定"]
+        decision{"停止モードかつ<br/>対応する停止条件に該当？"}
+        blocked["対象の送信処理を停止"]
+        passed["元のAPIを実行<br/>本文の検査・複製はしない"]
+        fields --> monitor
+        api --> monitor
+        monitor --> decision
+        decision -->|はい| blocked
+        decision -->|いいえ| passed
+    end
+
+    bridge["bridge.js：ISOLATED world<br/>固定スキーマの<br/>メタデータに縮小"]
+    browser["Chrome webRequest<br/>送信先・種別・リダイレクトの観測<br/>通信本文・ヘッダーは取得しない"]
+    background["background.js + core.js<br/>送信元・入力タイミングを照合<br/>通知除外・重複抑制・記録"]
+    settings[("storage.local<br/>監視モード・通知除外")]
+    session[("storage.session<br/>検知記録・入力タイミング")]
+    notifications["ページ内通知：bridge.js<br/>種類ごとに重要度順で積み重ね"]
+    popup["popup.js<br/>理由・深刻度・停止結果を表示<br/>設定・通知除外・記録の削除"]
+
+    monitor -->|入力イベント・検知結果| bridge
+    bridge -->|メタデータのみ| background
+    browser --> background
+    settings --> background
+    background --> session
+    background -->|通知データ| notifications
+    session -->|バックグラウンド経由で閲覧| popup
+
+    classDef neutral fill:#f5f7f3,stroke:#a8b9a7,color:#273d32
+    class fields,api,monitor,bridge,browser,background,settings,session,popup,blocked,passed,notifications neutral
+```
+
+| 深刻度 | 表示色 | 判定する挙動 |
+| --- | --- | --- |
+| FATAL | 紫 | フォームの送信先が最初に観測した送信先から変わった |
+| CRITICAL | 赤 | 入力直後の外部送信・通信・リダイレクト |
+| WARNING | 黄 | HTTPの送信先、フォームの外部送信先 |
+
+深刻度は挙動からの推定です。FATALでも漏えいや悪意が確認できたという意味にはなりません。HTTPと自動送信の疑いなどが重なれば、どれか一つに絞らず、すべての理由を表示します。
+
+**停止できるのはページ側で監視できた送信処理だけ**です。`webRequest` は送信先などの観測に使い、本文を見たり、そこから通信を遮断したりはしません。通知除外は元ページと送信先のオリジンの完全一致で適用します。深刻度の名前だけで停止を決めず、既存の停止条件と監視モードで判定します。
+
+設定の変更は `background.js → bridge.js → monitor.js` の順に反映します。図では検知の流れを追いやすくするため、この逆向きの設定経路は省略しています。未知のメッセージ項目やURLのパス・クエリは拡張内への受け渡し時に除外し、メモリ内の検知記録は最大100件／タブです。
+
 ## 操作
 
 - 初期設定は **検知のみ**。通信は止めず、拡張アイコンのバッジ、ポップアップ、ページ右下の通知で確認できます。

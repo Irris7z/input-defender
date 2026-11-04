@@ -334,10 +334,20 @@ test("HTTP banners immediately show early transfers and form changes, and the po
     expect(levels[0]).toBe("FATAL");
     expect(levels).toEqual([...levels].sort((a, b) => ({FATAL: 0, CRITICAL: 1, WARNING: 2}[a] - {FATAL: 0, CRITICAL: 1, WARNING: 2}[b])));
     for (const [level, expectedColor] of Object.entries({WARNING: "rgb(186, 139, 23)", CRITICAL: "rgb(182, 50, 50)", FATAL: "rgb(118, 52, 160)"})) {
-      const node = stack.cards.find(node => stack.attribute(node, "class") === `notice ${level}`);
-      expect(node).toBeTruthy();
-      const {computedStyle} = await cdp.send("CSS.getComputedStyleForNode", {nodeId: node.nodeId});
-      expect(computedStyle.find(property => property.name === "border-left-color").value).toBe(expectedColor);
+      await expect.poll(async () => {
+        // Asynchronous API/network reports can redraw the stack between CDP calls.
+        // Reacquire the node on every attempt rather than holding an obsolete DOM id.
+        const current = await notificationNodes();
+        const node = current.cards.find(node => current.attribute(node, "class") === `notice ${level}`);
+        if (!node) return null;
+        try {
+          const {computedStyle} = await cdp.send("CSS.getComputedStyleForNode", {nodeId: node.nodeId});
+          return computedStyle.find(property => property.name === "border-left-color")?.value;
+        } catch (error) {
+          if (error.message.includes("Could not find node with given id")) return null;
+          throw error;
+        }
+      }, {message: `${level} notification must use its assigned color`}).toBe(expectedColor);
     }
     await page.click("#lab-xhr");
     await hasEvent(event => event.kind === "xhr");
