@@ -1,0 +1,64 @@
+name: Validate and release
+
+on:
+  push:
+    branches: [main]
+  # Also handles the first main branch being created through GitHub's API.
+  create:
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run unit and privacy checks
+        run: npm test
+      - name: Install test browser
+        run: npx playwright install --with-deps chromium
+      - name: Run browser checks
+        run: npm run test:browser
+      - name: Package extension
+        run: npm run package
+      - name: Create checksum
+        working-directory: artifacts
+        run: sha256sum input-defender-*.zip > SHA256SUMS.txt
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          version="$(node -p "require('./extension/manifest.json').version")"
+          tag="v${version}"
+          notes="docs/releases/${tag}.md"
+          test -f "$notes"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists; leaving its tag and assets unchanged."
+            exit 0
+          fi
+          gh release create "$tag" \
+            "artifacts/input-defender-${version}.zip" \
+            "artifacts/SHA256SUMS.txt" \
+            --target "$GITHUB_SHA" \
+            --title "Input Defender ${tag}" \
+            --notes-file "$notes" \
+            --latest

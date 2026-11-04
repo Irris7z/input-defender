@@ -1,0 +1,237 @@
+"use strict";
+const {test, expect, chromium} = require("@playwright/test");
+const {mkdtempSync, rmSync, mkdirSync} = require("node:fs");
+const {tmpdir} = require("node:os");
+const {join, resolve} = require("node:path");
+let context, worker, profile, extensionId, page;
+let errors = [];
+const site = "http://127.0.0.1:4173";
+const destination = "http://127.0.0.1:4174";
+async function tabId() {
+  return worker.evaluate(async site => (await chrome.tabs.query({})).find(t => t.url?.startsWith(site))?.id, site);
+}
+async function state() {
+  const id = await tabId();
+  return worker.evaluate(async id => (await chrome.storage.session.get(`tab:${id}`))[`tab:${id}`], id);
+}
+async function config(value) {
+  await worker.evaluate(async settings => {
+    await chrome.storage.local.set({settings});
+    for (const tab of await chrome.tabs.query({})) await chrome.tabs.sendMessage(tab.id, {type: "config-changed", settings}).catch(() => {});
+  }, value);
+}
+async function input() {
+  await page.locator('[name="full-name"]').fill("DUMMY-NAME-SECRET");
+  await expect.poll(async () => Object.values((await state())?.frames || {}).some(f => f.lastInput > 0)).toBe(true);
+}
+async function hasEvent(predicate) {
+  await expect.poll(async () => (await state())?.events.some(predicate)).toBe(true);
+}
+test.beforeAll(async () => {
+  profile = mkdtempSync(join(tmpdir(), "input-defender-test-"));
+  const extension = resolve(__dirname, "../../extension");
+  context = await chromium.launchPersistentContext(profile, {channel: "chromium", headless: true, args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`]});
+  worker = context.serviceWorkers()[0] || await context.waitForEvent("serviceworker");
+  extensionId = worker.url().split("/")[2];
+});
+test.beforeEach(async () => {
+  errors = [];
+  await config({mode: "observe", allowlist: []});
+  page = await context.newPage();
+  page.on("pageerror", error => { errors.push(error.message); console.error(error.stack); });
+  await page.goto(site);
+  await expect.poll(async () => (await state())?.monitoring).toBe(true);
+});
+test.afterEach(async () => {
+  await page.close();
+  expect(errors).toEqual([]);
+});
+test.afterAll(async () => { await context?.close(); if (profile) rmSync(profile, {recursive: true, force: true}); });
+
+test("loaded extension identifies a sensitive HTTP form without inspecting values", async () => {
+  await hasEvent(e => e.reason === "insecure" && e.kind === "form");
+  expect((await state()).events.every(e => e.blocked === false)).toBe(true);
+});
+test("Fetch is observed, allowed by default, and only origin metadata survives", async () => {
+  await input();
+  const response = await page.evaluate(async destination => {
+    const input = document.querySelector("input");
+    Object.defineProperty(input, "value", {get() { throw new Error("Input value read"); }});
+    return (await fetch(`${destination}/secret-path?card=DUMMY-CARD-SECRET`, {method: "POST", body: "DUMMY-BODY-SECRET"})).status;
+  }, destination);
+  expect(response).toBe(200);
+  await hasEvent(e => e.kind === "fetch" && e.destination === destination);
+  const stored = await worker.evaluate(async () => JSON.stringify({local: await chrome.storage.local.get(null), session: await chrome.storage.session.get(null)}));
+  for (const secret of ["DUMMY-NAME-SECRET", "DUMMY-CARD-SECRET", "DUMMY-BODY-SECRET", "secret-path", "?card="]) expect(stored).not.toContain(secret);
+});
+test("strict mode stops Fetch, XHR, Beacon before the native request", async () => {
+  await config({mode: "block", allowlist: []});
+  await input();
+  const requests = [];
+  const watch = request => { if (request.url().startsWith(destination)) requests.push(request.url()); };
+  context.on("request", watch);
+  const results = await page.evaluate(async destination => {
+    let fetchResult, xhrResult;
+    try { await fetch(`${destination}/collect`, {method: "POST", body: "fixture"}); fetchResult = "sent"; } catch (e) { fetchResult = e.name; }
+    const xhr = new XMLHttpRequest(); xhr.open("POST", `${destination}/collect`);
+    try { xhr.send("fixture"); xhrResult = "sent"; } catch (e) { xhrResult = e.name; }
+    return {fetchResult, xhrResult, beacon: navigator.sendBeacon(`${destination}/collect`, "fixture")};
+  }, destination);
+  context.off("request", watch);
+  expect(results).toEqual({fetchResult: "SecurityError", xhrResult: "SecurityError", beacon: false});
+  expect(requests).toHaveLength(0);
+  await hasEvent(e => e.kind === "fetch" && e.blocked);
+  await hasEvent(e => e.kind === "xhr" && e.blocked);
+  await hasEvent(e => e.kind === "beacon" && e.blocked);
+});
+test("normal XHR and Beacon still forward the site's requests in observe mode", async () => {
+  await input();
+  await page.click("#xhr-test");
+  await hasEvent(e => e.kind === "xhr" && !e.blocked);
+  await page.click("#beacon-test");
+  await hasEvent(e => e.kind === "beacon" && !e.blocked);
+});
+test("browser-side observation catches image requests without reading a payload", async () => {
+  await input();
+  await page.click("#image-test");
+  await hasEvent(e => e.kind === "network" && e.destination === destination && !e.blocked);
+});
+test("form action mutation is detected even before any typing", async () => {
+  // HTTPS destination avoids the fixture's HTTP warning taking priority.
+  await page.evaluate(() => { document.querySelector("form").action = "https://changed.example/collect?private=secret"; });
+  await hasEvent(e => e.reason === "form-changed" && e.destination === "https://changed.example");
+});
+test("exact allowlist exempts only the selected source and destination", async () => {
+  await config({mode: "block", allowlist: [{source: site, destination}]});
+  await input();
+  const status = await page.evaluate(async destination => (await fetch(`${destination}/collect`, {method: "POST", body: "fixture"})).status, destination);
+  expect(status).toBe(200);
+  expect((await state()).events.some(e => e.destination === destination)).toBe(false);
+});
+test("page messages cannot change privileged settings or persist arbitrary fields", async () => {
+  await page.evaluate(() => {
+    window.postMessage({channel: "input-defender:v1", type: "set-settings", settings: {mode: "observe", allowlist: [{source: "*", destination: "*"}]}}, "*");
+    window.postMessage({channel: "input-defender:v1", type: "incident", incident: {kind: "fetch", reason: "typing-transfer", destination: "https://collector.example/path?SECRET=1", categories: ["card", "PRIVATE"], value: "PRIVATE", body: "PRIVATE", source: "https://forged.example"}}, "*");
+  });
+  await hasEvent(e => e.destination === "https://collector.example");
+  const stored = await state();
+  const incident = stored.events.find(e => e.destination === "https://collector.example");
+  expect(incident.source).toBe(site);
+  expect(incident.categories).toEqual(["card"]);
+  expect(JSON.stringify(stored)).not.toContain("PRIVATE");
+  expect(JSON.stringify(stored)).not.toContain("SECRET");
+  const settings = await worker.evaluate(async () => (await chrome.storage.local.get("settings")).settings);
+  expect(settings.allowlist).toEqual([]);
+});
+test("popup shows events, changes mode, requires explicit exclusion, clears records", async () => {
+  await input();
+  await page.click("#fetch-test");
+  await hasEvent(e => e.kind === "fetch");
+  const popupPromise = context.waitForEvent("page");
+  await worker.evaluate(async id => { await chrome.tabs.create({url: `chrome-extension://${id}/popup.html`, active: false}); }, extensionId);
+  const popup = await popupPromise;
+  await popup.waitForLoadState();
+  await popup.setViewportSize({width: 440, height: 600});
+  await expect(popup.locator("#site")).toHaveText(site);
+  await expect(popup.locator(".event").first()).toBeVisible();
+  mkdirSync(resolve("artifacts"), {recursive: true});
+  await popup.screenshot({path: resolve("artifacts/popup.png")});
+  await popup.selectOption("#event-filter", "blocked");
+  await expect(popup.locator("#events")).toContainText("条件に合う記録はありません");
+  await popup.selectOption("#event-filter", "all");
+  await popup.selectOption("#mode", "block");
+  await expect(popup.locator("#mode-note")).toContainText("停止");
+  await popup.locator(".allow-button").first().click();
+  await expect(popup.getByRole("group", {name: "通知除外の確認", exact: true})).toBeVisible();
+  expect((await worker.evaluate(async () => (await chrome.storage.local.get("settings")).settings)).allowlist).toHaveLength(0);
+  await popup.getByRole("button", {name: "この組み合わせを除外", exact: true}).click();
+  await expect(popup.locator("#allow-count")).toHaveText("1");
+  await expect(popup.locator(".allow-button").first()).toBeDisabled();
+  await popup.getByRole("tab", {name: "通知除外"}).click();
+  await expect(popup.locator("#allow-panel")).toBeVisible();
+  await expect(popup.locator("#allow-panel")).toContainText(destination);
+  await popup.screenshot({path: resolve("artifacts/popup-exclusions.png")});
+  await popup.getByRole("tab", {name: "プライバシー"}).click();
+  await expect(popup.locator("#privacy-panel")).toBeVisible();
+  await popup.screenshot({path: resolve("artifacts/popup-privacy.png")});
+  await popup.getByRole("tab", {name: "プライバシー"}).press("Home");
+  await expect(popup.getByRole("tab", {name: "検知記録"})).toHaveAttribute("aria-selected", "true");
+  await popup.setViewportSize({width: 320, height: 440});
+  const layout = await popup.evaluate(() => ({width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth,
+    tabsBottom: document.querySelector(".panel-nav").getBoundingClientRect().bottom,
+    modeTop: document.getElementById("mode").getBoundingClientRect().top, workspaceHeight: document.getElementById("workspace").clientHeight}));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width);
+  expect(layout.tabsBottom).toBeLessThanOrEqual(440);
+  expect(layout.modeTop).toBeGreaterThanOrEqual(0);
+  expect(layout.workspaceHeight).toBeGreaterThan(100);
+  await popup.screenshot({path: resolve("artifacts/popup-compact.png")});
+  await popup.setViewportSize({width: 440, height: 600});
+  await popup.click("#clear");
+  await expect(popup.locator("#clear-impact")).toContainText("元に戻せません");
+  expect(Number(await popup.locator("#event-count").textContent())).toBeGreaterThan(0);
+  await popup.getByRole("button", {name: "キャンセル", exact: true}).press("Escape");
+  await expect(popup.locator("#clear-confirm")).toBeHidden();
+  await popup.click("#clear");
+  await popup.click("#clear-yes");
+  await expect(popup.locator("#event-count")).toHaveText("0");
+  await expect(popup.locator("#clear")).toBeDisabled();
+  expect((await worker.evaluate(async () => (await chrome.storage.local.get("settings")).settings)).allowlist).toHaveLength(1);
+  await popup.screenshot({path: resolve("artifacts/popup-empty.png")});
+  await popup.close();
+});
+test("reload removes old session events and stale input timing", async () => {
+  await input();
+  await page.click("#fetch-test");
+  await hasEvent(e => e.kind === "fetch");
+  await page.reload();
+  await expect.poll(async () => (await state())?.monitoring).toBe(true);
+  expect((await state()).events.some(e => e.kind === "fetch")).toBe(false);
+  expect(Object.values((await state()).frames).every(f => f.lastInput === 0)).toBe(true);
+});
+test("Chrome's actual action popup sizes to its available window and keeps navigation visible", async () => {
+  await worker.evaluate(() => chrome.action.openPopup());
+  const cdp = await context.newCDPSession(page);
+  const target = (await cdp.send("Target.getTargets")).targetInfos.find(t => t.url === `chrome-extension://${extensionId}/popup.html`);
+  expect(target).toBeTruthy();
+  const {sessionId} = await cdp.send("Target.attachToTarget", {targetId: target.targetId, flatten: false});
+  let sequence = 0;
+  async function call(method, params = {}) {
+    const id = ++sequence;
+    const response = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => { cdp.off("Target.receivedMessageFromTarget", listener); reject(new Error("Popup inspection timed out")); }, 5000);
+      const listener = event => {
+        const message = JSON.parse(event.message);
+        if (event.sessionId === sessionId && message.id === id) {
+          clearTimeout(timeout);
+          cdp.off("Target.receivedMessageFromTarget", listener);
+          resolve(message);
+        }
+      };
+      cdp.on("Target.receivedMessageFromTarget", listener);
+    });
+    await cdp.send("Target.sendMessageToTarget", {sessionId, message: JSON.stringify({id, method, params})});
+    return response;
+  }
+  try {
+    const result = await call("Runtime.evaluate", {expression: `new Promise(resolve => {
+      function read() {
+        if (document.readyState !== "complete" || !document.documentElement.classList.contains("native-popup")) { requestAnimationFrame(read); return; }
+        requestAnimationFrame(() => resolve({width: innerWidth, height: innerHeight, bodyHeight: document.body.clientHeight,
+          scrollWidth: document.documentElement.scrollWidth, navBottom: document.querySelector(".panel-nav").getBoundingClientRect().bottom,
+          workspaceHeight: document.getElementById("workspace").clientHeight}));
+      }
+      read();
+    })`, awaitPromise: true, returnByValue: true});
+    const layout = result.result.result.value;
+    expect(layout.width).toBe(440);
+    expect(layout.scrollWidth).toBe(layout.width);
+    expect(layout.bodyHeight).toBeLessThanOrEqual(layout.height);
+    expect(layout.navBottom).toBeLessThanOrEqual(layout.height);
+    expect(layout.workspaceHeight).toBeGreaterThan(100);
+    const screenshot = await call("Page.captureScreenshot", {format: "png"});
+    require("node:fs").writeFileSync(resolve("artifacts/popup-native.png"), Buffer.from(screenshot.result.data, "base64"));
+  } finally {
+    await cdp.send("Target.closeTarget", {targetId: target.targetId});
+    await cdp.detach();
+  }
+});

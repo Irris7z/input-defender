@@ -1,0 +1,11 @@
+"use strict";
+const {mkdirSync, readFileSync, rmSync} = require("node:fs");
+const {join, resolve} = require("node:path");
+const {execFileSync} = require("node:child_process");
+const root = resolve(__dirname, "..");
+const manifest = JSON.parse(readFileSync(join(root, "extension/manifest.json"), "utf8"));
+mkdirSync(join(root, "artifacts"), {recursive: true});
+const out = join(root, "artifacts", `input-defender-${manifest.version}.zip`);
+rmSync(out, {force: true});
+execFileSync("zip", ["-r", out, ".", "-x", "*.DS_Store"], {cwd: join(root, "extension"), stdio: "inherit"});
+console.log(out);
