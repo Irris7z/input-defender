@@ -10,7 +10,7 @@
   <script defer src="popup.js"></script>
 </head>
 <body>
-  <header class="app-header"><div class="brand"><img src="icons/48.png" width="24" height="24" alt=""><h1>Input Defender</h1></div><span class="version">v0.1.1</span></header>
+  <header class="app-header"><div class="brand"><img src="icons/48.png" width="24" height="24" alt=""><h1>Input Defender</h1></div><span class="version">v0.2.0</span></header>
   <section class="page-context" aria-label="現在のページ">
     <p id="site" class="origin">ページを確認中</p>
     <div class="status" aria-live="polite"><span class="status-symbol" aria-hidden="true">●</span><h2 id="status-label">監視状態を確認中</h2></div>
@@ -25,11 +25,17 @@
       <div id="clear-confirm" class="confirm-box" role="group" aria-labelledby="clear-title" hidden><h3 id="clear-title">このタブの記録を削除しますか？</h3><p id="clear-impact"></p><div class="button-row"><button id="clear-yes" class="button danger">記録だけを削除</button><button id="clear-cancel" class="button secondary">キャンセル</button></div></div>
       <div id="events" aria-live="polite" aria-describedby="record-note"></div>
     </section>
+    <section id="structure-panel" class="panel" aria-labelledby="structure-tab" role="tabpanel" hidden>
+      <h2>入力前から調べるサイト構造</h2>
+      <p class="caption">フォームの設定と参照先を自動で調べ、変更も監視します。外部参照があるだけでは警告しません。</p>
+      <p class="caption">スクリプトの内容や動作の安全性を判定するものではありません。表示の件数は取得できたDOMの範囲です。</p>
+      <div id="structure-results"></div>
+    </section>
     <section id="allow-panel" class="panel" aria-labelledby="allow-tab" role="tabpanel" hidden><h2>警告を除外する送信先</h2><p class="caption">信頼できる場合だけ、検知記録から追加してください。警告と送信の停止が解除されます。</p><p class="caption">元ページと送信先の組み合わせにだけ適用します。サブドメイン・別ポートは別の送信先として扱います。</p><div id="allow-rules"></div></section>
     <section id="privacy-panel" class="panel about" aria-labelledby="privacy-tab" role="tabpanel" hidden><h2>プライバシーと検知範囲</h2><h3>取得しない情報</h3><p>入力値、入力した文字、通信本文、Cookie、通信ヘッダーは読み取りません。外部の判定サービスやアクセス解析にも接続しません。</p><h3>記録する情報</h3><p>送信先のドメインと接続方法、入力欄の種類、検知理由、時刻などを記録します。URLのパスや検索パラメーターは記録しません。</p><h3>保存と削除</h3><p>検知記録はブラウザのメモリ内だけに保存し、ページ再読み込み・タブ終了・ブラウザ終了で消えます。監視モードと通知除外はこの端末に保存します。</p><h3>警告の意味と限界</h3><p>正規の決済や住所補完でも警告する場合があります。警告は漏えいや悪意の断定ではありません。同じサイトへの送信や監視を回避する攻撃などは見逃すことがあり、警告がなくても安全を保証しません。</p><h3>送信を停止できる範囲</h3><p>対応する通信手段とフォーム送信に限ります。通信の観測だけで検知したものは停止できません。ページ内の警告や通信監視は、サイト側に妨害される可能性があります。</p></section>
   </main>
   <div id="message" role="status" hidden></div>
-  <nav class="panel-nav" role="tablist" aria-label="表示する内容"><button id="records-tab" role="tab" aria-selected="true" aria-controls="records-panel">検知記録</button><button id="allow-tab" role="tab" aria-selected="false" aria-controls="allow-panel" tabindex="-1">通知除外 <span id="allow-count">0</span></button><button id="privacy-tab" role="tab" aria-selected="false" aria-controls="privacy-panel" tabindex="-1">プライバシー</button></nav>
+  <nav class="panel-nav" role="tablist" aria-label="表示する内容"><button id="records-tab" role="tab" aria-selected="true" aria-controls="records-panel">検知記録</button><button id="structure-tab" role="tab" aria-selected="false" aria-controls="structure-panel" tabindex="-1">サイト構造</button><button id="allow-tab" role="tab" aria-selected="false" aria-controls="allow-panel" tabindex="-1">通知除外 <span id="allow-count">0</span></button><button id="privacy-tab" role="tab" aria-selected="false" aria-controls="privacy-panel" tabindex="-1">プライバシー</button></nav>
   <footer>入力値・通信本文の取得なし ／ 外部送信なし</footer>
 </body>
 </html>

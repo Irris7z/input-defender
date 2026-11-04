@@ -11,6 +11,42 @@ test("schema attributes classify Japanese and standard payment fields", () => {
   assert.equal(Core.fieldCategory({type: "hidden", name: "card-number"}), null);
   assert.equal(Core.fieldCategory({name: "search"}), null);
 });
+test("GET forms warn before input, respect HTML method defaults, and dialog forms do not send", () => {
+  for (const method of [null, "", "put", " POST ", "GET"]) assert.equal(Core.formMethod(method), "GET");
+  assert.equal(Core.formMethod("post"), "POST");
+  assert.equal(Core.formMethod("dialog"), "DIALOG");
+  const form = {...base, kind: "form", destination: base.source, recentInput: false, method: "GET"};
+  assert.deepEqual(Core.analyze(form).reasons, ["form-query"]);
+  assert.equal(Core.analyze(form, {mode: "block"}).blocked, true);
+  assert.equal(Core.analyze({...form, attempt: false}, {mode: "block"}).blocked, false);
+  assert.equal(Core.analyze({...form, method: "POST"}), null);
+  assert.equal(Core.analyze({...form, method: "DIALOG", changed: true}), null);
+});
+test("only new external resource origins with sensitive fields warn; no execution blocking claim", () => {
+  for (const [kind, reason, severity] of [["script", "script-origin-added", "CRITICAL"], ["frame", "frame-origin-added", "WARNING"]]) {
+    const meta = {...base, kind, recentInput: false, added: true};
+    assert.equal(Core.analyze({...meta, added: false}), null);
+    assert.equal(Core.analyze({...meta, categories: []}), null);
+    assert.equal(Core.analyze({...meta, destination: base.source}), null);
+    const incident = Core.analyze(meta, {mode: "block"});
+    assert.deepEqual(incident.reasons, [reason]);
+    assert.equal(incident.severity, severity);
+    assert.equal(incident.blocked, false);
+  }
+});
+test("structure metadata strips arbitrary values, paths and credentials and bounds rows/counts", () => {
+  const destination = "https://user:PRIVATE@collect.example/PRIVATE?PRIVATE=1#PRIVATE";
+  const snapshot = Core.sanitizeStructure({complete: true, value: "PRIVATE", categories: ["card", "PRIVATE"], formCount: Infinity,
+    sensitiveFieldCount: 50000, forms: Array(40).fill({destination, method: "GET", categories: ["card", "PRIVATE"], value: "PRIVATE", count: -5}),
+    scripts: [{origin: destination, count: 2, integrityCount: 9, body: "PRIVATE"}], frames: [{origin: "javascript:PRIVATE"}]});
+  assert.equal(JSON.stringify(snapshot).includes("PRIVATE"), false);
+  assert.equal(snapshot.forms.length, 30);
+  assert.equal(snapshot.formCount, 0);
+  assert.equal(snapshot.sensitiveFieldCount, 10000);
+  assert.equal(snapshot.scripts[0].integrityCount, 2);
+  assert.deepEqual(snapshot.frames, []);
+  assert.equal(Core.sanitizeStructure(null), null);
+});
 test("origin normalization strips paths, query, credentials, fragments", () => {
   assert.equal(Core.origin("https://user:pass@collect.example/private/secret?card=123#name"), "https://collect.example");
   assert.equal(Core.origin("/collect?secret=abc", "https://shop.example"), "https://shop.example");

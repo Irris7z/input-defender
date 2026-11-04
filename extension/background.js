@@ -70,11 +70,25 @@ async function handle(message, sender) {
   const state = await stateFor(tabId);
   if (message.type === "config") {
     state.monitoring = true;
-    state.frames[frameId] = {source, lastInput: 0, lastSubmit: 0, categories: []};
+    if (!state.frames[frameId] || state.frames[frameId].documentId !== sender.documentId) {
+      state.frames[frameId] = {source, documentId: sender.documentId, lastInput: 0, lastSubmit: 0, categories: []};
+    }
     await save(tabId, state);
     return {settings: config};
   }
   const frame = state.frames[frameId] || {source, lastInput: 0, lastSubmit: 0, categories: []};
+  if (message.type === "structure") {
+    const structure = Core.sanitizeStructure(message.structure);
+    if (structure) {
+      frame.source = source;
+      frame.structure = structure;
+      state.frames[frameId] = frame;
+      // Bound metadata from pages containing many child frames.
+      for (const id of Object.keys(state.frames).slice(100)) delete state.frames[id];
+      await chrome.storage.session.set({[tabKey(tabId)]: state});
+    }
+    return {ok: true};
+  }
   if (message.type === "activity") {
     frame.source = source;
     frame.categories = Core.categories(message.categories);

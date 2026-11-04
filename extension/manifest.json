@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Input Defender",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "minimum_chrome_version": "119",
   "description": "入力値を読まず、フォームの変更や入力直後の外部通信などの不審な挙動を検知します。",
   "permissions": ["storage", "webRequest"],

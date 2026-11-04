@@ -11,7 +11,13 @@
   let budgetStart = Date.now(), messageCount = 0;
   const source = Core.origin(location.origin);
   const send = message => chrome.runtime.sendMessage(message).catch(() => null);
-  function configure(settings) { window.postMessage({channel, type: "config", settings: Core.sanitizeSettings(settings)}, "*"); }
+  let structure;
+  function configure(settings) {
+    const config = Core.sanitizeSettings(settings);
+    if (structure) structure.configure(config);
+    else structure = globalThis.InputDefenderStructure.start(send, config);
+    window.postMessage({channel, type: "config", settings: config}, "*");
+  }
   function ensureStack() {
     if (stack?.isConnected) return;
     stack = document.createElement("div");
@@ -171,4 +177,6 @@
     }
   });
   window.postMessage({channel, type: "ping"}, "*");
+  // Structure analysis must start even if the page suppresses MAIN-world messages.
+  send({type: "config"}).then(response => { if (response && !structure) configure(response.settings); });
 })();

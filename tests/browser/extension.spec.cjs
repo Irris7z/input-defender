@@ -52,6 +52,73 @@ test("loaded extension identifies a sensitive HTTP form without inspecting value
   await hasEvent(e => e.reason === "insecure" && e.kind === "form");
   expect((await state()).events.every(e => e.blocked === false)).toBe(true);
 });
+test("structure scanning finds GET risks and sensitive fields before any input, without retaining URL paths", async () => {
+  await page.goto(`${site}/structure-lab.html`);
+  await hasEvent(e => e.kind === "form" && e.reasons.includes("form-query") && !e.blocked);
+  await expect.poll(async () => (await state())?.frames["0"]?.structure?.complete).toBe(true);
+  const snapshot = (await state()).frames["0"];
+  expect(snapshot.lastInput).toBe(0);
+  expect(snapshot.structure.sensitiveFieldCount).toBe(1);
+  expect(snapshot.structure.forms).toContainEqual({destination: site, method: "GET", categories: ["name"], count: 1});
+  expect(JSON.stringify(snapshot.structure)).not.toContain("structure-probe");
+  await expect(page.locator('[name="full-name"]')).toHaveValue("");
+});
+test("new external script and frame origins warn before input even when page APIs are overwritten", async () => {
+  await page.goto(`${site}/structure-lab.html`);
+  await expect.poll(async () => (await state())?.frames["0"]?.structure?.complete).toBe(true);
+  await page.evaluate(() => { document.querySelectorAll = () => []; });
+  await page.click("#add-script");
+  await hasEvent(e => e.reason === "script-origin-added" && e.severity === "CRITICAL" && !e.blocked);
+  await page.click("#add-frame");
+  await hasEvent(e => e.reason === "frame-origin-added" && e.severity === "WARNING" && !e.blocked);
+  expect((await state()).frames["0"].lastInput).toBe(0);
+  await expect.poll(async () => (await state())?.frames["0"]?.structure?.scripts.some(s => s.origin === destination)).toBe(true);
+});
+test("initial third-party scripts are inventoried without declaring their existence malicious", async () => {
+  const html = require("node:fs").readFileSync(resolve("fixtures/structure-lab.html"), "utf8").replace(`${site}/structure-probe.js`, `${destination}/structure-probe.js`);
+  await page.route("**/structure-lab.html", route => route.fulfill({contentType: "text/html", body: html}));
+  await page.goto(`${site}/structure-lab.html`);
+  await expect.poll(async () => (await state())?.frames["0"]?.structure?.externalScriptCount).toBe(1);
+  expect((await state()).events.some(e => e.reason === "script-origin-added")).toBe(false);
+  expect((await state()).frames["0"].structure.scripts).toEqual([{origin: destination, count: 1, integrityCount: 0}]);
+});
+test("formmethod overrides and controls associated from outside a form are scanned and blocked on submit", async () => {
+  await page.goto(`${site}/structure-lab.html`);
+  await page.evaluate(() => {
+    document.getElementById("query-form").remove();
+    const form = document.createElement("form");
+    form.id = "associated"; form.method = "POST"; form.action = "/collect"; form.target = "receiver";
+    const field = document.createElement("input"); field.name = "email"; field.setAttribute("form", "associated");
+    const button = document.createElement("button"); button.id = "override-submit"; button.setAttribute("form", "associated"); button.setAttribute("formmethod", "GET"); button.textContent = "Empty GET override";
+    document.body.append(form, field, button);
+  });
+  await expect.poll(async () => (await state())?.frames["0"]?.structure?.forms.map(f => f.method).sort()).toEqual(["GET", "POST"]);
+  await config({mode: "block", allowlist: []});
+  const request = page.waitForRequest(r => r.url().startsWith(`${site}/collect`), {timeout: 800}).catch(() => null);
+  await page.click("#override-submit");
+  expect(await request).toBeNull();
+  await hasEvent(e => e.blocked && e.reasons.includes("form-query"));
+});
+test("structure panel fits a narrow popup and displays metadata rather than a safety score", async () => {
+  await page.goto(`${site}/structure-lab.html`);
+  await page.click("#add-script");
+  await hasEvent(e => e.reason === "script-origin-added");
+  const popupPromise = context.waitForEvent("page");
+  await worker.evaluate(async id => { await chrome.tabs.create({url: `chrome-extension://${id}/popup.html`, active: false}); }, extensionId);
+  const popup = await popupPromise;
+  try {
+    await popup.waitForLoadState();
+    await popup.setViewportSize({width: 320, height: 440});
+    await popup.click("#structure-tab");
+    await expect(popup.locator("#structure-results")).toContainText(`GET → ${site}`);
+    await expect(popup.locator("#structure-results")).toContainText(destination);
+    const layout = await popup.evaluate(() => ({width: innerWidth, scroll: document.documentElement.scrollWidth, navBottom: document.querySelector(".panel-nav").getBoundingClientRect().bottom, height: innerHeight}));
+    expect(layout.scroll).toBe(layout.width);
+    expect(layout.navBottom).toBeLessThanOrEqual(layout.height);
+    mkdirSync(resolve("artifacts"), {recursive: true});
+    await popup.screenshot({path: resolve("artifacts/structure-popup.png")});
+  } finally { await popup.close(); }
+});
 test("Fetch is observed, allowed by default, and only origin metadata survives", async () => {
   await input();
   const response = await page.evaluate(async destination => {
