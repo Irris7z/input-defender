@@ -20,6 +20,8 @@ test("runtime code never reads form contents or serializes network bodies", () =
   }
   const monitor = readFileSync(join(root, "monitor.js"), "utf8").replace(/\/\/[^\n]*/g, "");
   assert.equal(/\.value\b|\.innerText\b|\.textContent\b|\.key\b|\.code\b/.test(monitor), false);
+  const structure = readFileSync(join(root, "structure.js"), "utf8").replace(/\/\/[^\n]*/g, "");
+  assert.equal(/\.value\b|\.innerText\b|\.textContent\b|\.innerHTML\b|\.outerHTML\b|getAttribute\(["']value["']/.test(structure), false);
 });
 test("MAIN hooks preserve opaque bodies without reading or copying their properties", async () => {
   const calls = [];

@@ -98,13 +98,14 @@
     // getAttribute avoids named form controls shadowing properties such as action.
     const overridden = submitter instanceof Element ? submitter.getAttribute("formaction") : null;
     const action = overridden ?? form.getAttribute("action");
+    const method = Core.formMethod(submitter instanceof Element ? submitter.getAttribute("formmethod") ?? form.getAttribute("method") : form.getAttribute("method"));
     const destination = Core.origin(action || location.href, document.baseURI);
     const target = overridden === null ? form : submitter;
     const hadBaseline = formOrigins.has(target);
     const changed = hadBaseline && formOrigins.get(target) !== destination;
     // Keep the first destination as a baseline, including after mutation delivery.
     if (!hadBaseline) formOrigins.set(target, destination);
-    return report(Core.analyze({source, destination, categories: fields, kind: "form", changed, attempt,
+    return report(Core.analyze({source, destination, categories: fields, kind: "form", method, changed, attempt,
       recentInput: false, userSubmitted: true}, settings));
   }
   window.addEventListener("submit", event => {
@@ -125,11 +126,11 @@
   };
   function scan(root) {
     if (root instanceof HTMLFormElement) inspectForm(root);
-    if (root instanceof Element && root.matches("button[formaction], input[formaction]") && root.form) inspectForm(root.form, false, root);
+    if (root instanceof Element && root.matches("button[formaction], input[formaction], button[formmethod], input[formmethod]") && root.form) inspectForm(root.form, false, root);
     if (root.querySelectorAll) {
       for (const form of root.querySelectorAll("form")) inspectForm(form);
       // Form-associated submit buttons can override action on the form.
-      for (const button of root.querySelectorAll("button[formaction], input[formaction]")) {
+      for (const button of root.querySelectorAll("button[formaction], input[formaction], button[formmethod], input[formmethod]")) {
         if (button.form) inspectForm(button.form, false, button);
       }
     }
@@ -139,13 +140,15 @@
   const observer = new MutationObserver(records => {
     for (const record of records) {
       if (record.type === "attributes") {
-        if (record.target.hasAttribute("formaction")) pendingForms.add(record.target);
+        if (record.target.hasAttribute("formaction") || record.target.hasAttribute("formmethod")) pendingForms.add(record.target);
+        if (record.target.matches("base[href]")) pendingForms.add(document.documentElement);
         const form = record.target instanceof HTMLFormElement ? record.target : record.target.form;
         if (form) pendingForms.add(form);
       } else {
         const parentForm = record.target.closest?.("form");
         if (parentForm) pendingForms.add(parentForm);
         for (const node of record.addedNodes) if (node instanceof Element) pendingForms.add(node);
+        if ([...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element && (node.matches("base") || node.querySelector("base")))) pendingForms.add(document.documentElement);
       }
     }
     if (!scanScheduled && pendingForms.size) {
@@ -153,7 +156,7 @@
       queueMicrotask(() => { scanScheduled = false; for (const root of pendingForms) scan(root); pendingForms.clear(); });
     }
   });
-  observer.observe(document, {childList: true, subtree: true, attributes: true, attributeFilter: ["action", "formaction", "autocomplete", "type", "name", "id"]});
+  observer.observe(document, {childList: true, subtree: true, attributes: true, attributeFilter: ["action", "formaction", "method", "formmethod", "form", "href", "autocomplete", "type", "name", "id"]});
   window.addEventListener("message", event => {
     if (event.source !== window || event.data?.channel !== channel) return;
     if (event.data.type === "config") {

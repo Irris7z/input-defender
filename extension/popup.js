@@ -10,6 +10,7 @@ let working = false;
 let loaded = false;
 let renderedEvents = "";
 let renderedRules = "";
+let renderedStructure = "";
 // An extension tab can resize; Chrome's actual action popup needs intrinsic dimensions.
 chrome.tabs.getCurrent().then(tab => {
   if (!tab) document.documentElement.classList.add("native-popup");
@@ -160,7 +161,7 @@ function renderEvents(force = false) {
     if (event.source !== activeUrl) card.append(element("div", "source", `ページ内の元ページ: ${event.source}`));
     card.append(element("div", "tags", `入力欄の種類: ${event.categories.map(c => Core.CATEGORIES[c]).join(" / ")}`));
     const bottom = element("div", "event-bottom");
-    bottom.append(element("span", `outcome ${event.blocked ? "blocked" : ""}`, event.blocked ? "送信処理を停止" : event.kind === "network" ? "通信先を観測・停止対象外" : event.kind === "form" ? "フォームを確認・停止なし" : "送信処理を検知・停止なし"));
+    bottom.append(element("span", `outcome ${event.blocked ? "blocked" : ""}`, event.blocked ? "送信処理を停止" : ["script", "frame"].includes(event.kind) ? "構造の変化を観測・停止対象外" : event.kind === "network" ? "通信先を観測・停止対象外" : event.kind === "form" ? "フォームを確認・停止なし" : "送信処理を検知・停止なし"));
     const excluded = Core.allowed(config.allowlist, event.source, event.destination);
     const allow = element("button", "button secondary allow-button", excluded ? "除外済み" : "この送信先の警告を除外…");
     allow.dataset.excluded = String(excluded);
@@ -173,6 +174,42 @@ function renderEvents(force = false) {
     root.append(card);
   }
   syncControls();
+}
+function renderStructure(frames) {
+  const signature = JSON.stringify(frames);
+  if (signature === renderedStructure) return;
+  renderedStructure = signature;
+  const root = $("structure-results");
+  root.replaceChildren();
+  const entries = Object.entries(frames || {}).filter(([, frame]) => frame.structure);
+  if (!entries.length) root.append(element("div", "empty", "構造情報はまだありません。通常のWebページを再読み込みしてください。"));
+  for (const [id, frame] of entries) {
+    const data = Core.sanitizeStructure(frame.structure);
+    const card = element("article", "structure-frame");
+    card.append(element("h3", "", `${id === "0" ? "メインページ" : "埋め込みページ"}: ${frame.source}`),
+      element("p", "caption", `${data.complete ? "初期DOMの読み込み済み・変更を監視中" : "初期DOMを読み込み中"}${data.truncated ? " / 上限により一部省略" : ""}`),
+      element("p", "", `個人情報用の欄 ${data.sensitiveFieldCount}件 / フォーム ${data.formCount}件（個人情報用 ${data.sensitiveFormCount}件）`),
+      element("p", "caption", `入力欄の種類: ${data.categories.map(c => Core.CATEGORIES[c]).join(" / ") || "未分類"}`),
+      element("h3", "", "個人情報用フォームの送信先・送信方法"));
+    if (!data.forms.length) card.append(element("p", "caption", "HTTP(S)の送信先を持つ個人情報用フォームは見つかっていません。"));
+    for (const form of data.forms) {
+      const row = element("div", "structure-row", `${form.method} → ${form.destination}`);
+      row.append(element("span", "", `${form.categories.map(c => Core.CATEGORIES[c]).join(" / ")} · 設定 ${form.count}件（送信ボタンの上書きを含む）`));
+      card.append(row);
+    }
+    card.append(element("h3", "", `外部スクリプト ${data.externalScriptCount}件 / src属性付き ${data.scriptCount}件`));
+    if (!data.scripts.length) card.append(element("p", "caption", "外部のHTTP(S)参照元は見つかっていません。"));
+    for (const script of data.scripts) {
+      const row = element("div", "structure-row", script.origin);
+      row.append(element("span", "", `${script.count}件 / integrity属性あり ${script.integrityCount}件（属性の有無のみ・内容は検証しません）`));
+      card.append(row);
+    }
+    card.append(element("h3", "", `埋め込みフレーム ${data.frameCount}件`));
+    for (const frame of data.frames) card.append(element("div", "structure-row", `${frame.origin} · ${frame.count}件`));
+    if (data.opaqueFrameCount) card.append(element("p", "caption", `srcdoc・about:blankなど、HTTP(S)参照先に分類できないもの ${data.opaqueFrameCount}件`));
+    card.append(element("p", "caption", "インラインスクリプト、スクリプト内部の追加読込、Shadow DOM内部などはこの一覧の対象外です。"));
+    root.append(card);
+  }
 }
 async function refresh() {
   if (!Number.isInteger(tabId)) return;
@@ -192,6 +229,7 @@ async function refresh() {
     : currentEvents.length ? "身に覚えのない送信先がないか、検知記録を確認してください。"
     : "操作は不要です。不審な動きがあれば警告します。安全を保証する表示ではありません。";
   renderEvents();
+  renderStructure(state.frames);
   syncControls();
 }
 async function run(task) {

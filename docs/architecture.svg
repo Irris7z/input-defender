@@ -57,11 +57,14 @@
   <g id="isolated-bridge" data-bounds="452 455 194 151">
   <rect x="452" y="455" width="194" height="151" rx="7" class="node"/>
   <use href="#bridge" x="468" y="469" width="34" height="34" class="icon"/>
-  <text x="514" y="493" class="node-title">橋渡し</text>
-  <text x="470" y="533" class="file">bridge.js</text>
-  <text x="470" y="562" class="detail">項目を形式検証</text>
-  <text x="470" y="588" class="detail">未知の項目を除外</text>
+  <text x="514" y="493" class="node-title">構造と橋渡し</text>
+  <text x="470" y="523" class="file">structure.js</text>
+  <text x="470" y="545" class="file">bridge.js</text>
+  <text x="470" y="569" class="detail">入力前のDOM分析</text>
+  <text x="470" y="590" class="detail">メタデータを形式検証</text>
   </g>
+  <path d="M364 300H404V435H549V453" class="wire"/>
+  <text x="423" y="425" class="wire-label">DOM属性</text>
   <path d="M364 526H450" class="wire"/>
   <rect x="361" y="494" width="88" height="23" fill="#f8faf7"/>
   <text x="366" y="511" class="wire-label">メタデータ</text>
@@ -115,7 +118,7 @@
   <use href="#window" x="1025" y="251" width="32" height="32" class="icon"/>
   <text x="1070" y="276" class="node-title">ポップアップ</text>
   <text x="1028" y="311" class="file">popup.js</text>
-  <text x="1028" y="334" class="note">理由・設定・記録削除</text>
+  <text x="1028" y="334" class="note">構造・理由・設定</text>
   </g>
   <path d="M1105 368V347" class="wire"/>
   <text x="1120" y="362" class="wire-label">背景経由</text>

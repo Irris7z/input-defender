@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src http://127.0.0.1:4173 http://127.0.0.1:4174; style-src 'unsafe-inline'; form-action http://127.0.0.1:4173 http://127.0.0.1:4174; frame-src http://127.0.0.1:4173 http://127.0.0.1:4174">
+<title>Input Defender · 入力前の構造確認</title>
+<style>body{max-width:760px;margin:40px auto;padding:20px;font:16px/1.8 system-ui;color:#263c32}section{padding:20px;border:1px solid #ccd7cb;border-radius:8px;margin:20px 0}label{display:block}input,button{font:inherit;padding:8px;margin:6px}small{display:block}</style>
+<h1>入力前の構造確認</h1>
+<p>何も入力せずに、拡張の検知記録と「サイト構造」を確認してください。個人情報を入力する必要はありません。</p>
+<section>
+  <h2>GET設定のフォーム</h2>
+  <p>GET送信の設定は、入力開始前からWARNINGとして表示されます。</p>
+  <form id="query-form" action="/collect" target="receiver">
+    <label>ダミー氏名欄<input name="full-name" autocomplete="name"></label>
+    <button type="submit">空欄でGET送信</button>
+  </form>
+</section>
+<section>
+  <h2>読み込み後の構造変更</h2>
+  <button id="add-script" type="button">新しい外部スクリプト参照を追加</button>
+  <button id="add-frame" type="button">新しい外部埋め込み先を追加</button>
+  <small>参照先はこの端末の別ポート4174のみです。スクリプトは空の検証用ファイルです。</small>
+</section>
+<iframe name="receiver" title="空欄送信の確認先" hidden></iframe>
+<script src="http://127.0.0.1:4173/structure-probe.js"></script>
+<script src="/structure-lab.js"></script>
+</html>

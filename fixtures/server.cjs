@@ -7,7 +7,13 @@ function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Cache-Control", "no-store");
-  if (req.url === "/attack-lab.html") {
+  if (req.url.startsWith("/structure-probe.js")) {
+    res.setHeader("Content-Type", "application/javascript");
+    res.end("/* Empty local structure probe. */");
+  } else if (req.url === "/structure-frame") {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.end('<!doctype html><meta charset="utf-8"><title>Local frame</title><p>Local structure fixture</p>');
+  } else if (req.url === "/attack-lab.html") {
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.end(readFileSync(join(__dirname, "attack-lab.html")));
   } else if (req.url.startsWith("/lab/collect?kind=")) {
@@ -28,7 +34,7 @@ function handler(req, res) {
         res.end("Local test received; body discarded.");
       }
     });
-  } else if (req.url === "/" || req.url === "/fixture.js" || req.url === "/fixture.css") {
+  } else if (["/", "/fixture.js", "/fixture.css", "/structure-lab.html", "/structure-lab.js"].includes(req.url)) {
     const file = req.url === "/" ? "index.html" : req.url.slice(1);
     res.setHeader("Content-Type", file.endsWith("html") ? "text/html; charset=utf-8" : file.endsWith("css") ? "text/css" : "application/javascript");
     res.end(readFileSync(join(__dirname, file)));

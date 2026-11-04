@@ -9,15 +9,19 @@
     "insecure": "個人情報用フォームに関係する、暗号化されない送信先です。",
     "typing-transfer": "個人情報用の欄への入力から5秒以内に、外部への送信APIが呼ばれました。",
     "network-after-input": "個人情報用の欄への入力から5秒以内に、外部リクエストが観測されました。本文は確認していません。",
-    "external-redirect": "入力直後の通信が、別オリジンへリダイレクトされました。本文は確認していません。"
+    "external-redirect": "入力直後の通信が、別オリジンへリダイレクトされました。本文は確認していません。",
+    "form-query": "個人情報用フォームがGET送信に設定され、入力内容がURLに含まれる構造です。入力値は確認していません。",
+    "script-origin-added": "個人情報用の入力欄があるページで、初期読み込み後に新しい外部スクリプトの参照元が追加されました。",
+    "frame-origin-added": "個人情報用の入力欄があるページで、初期読み込み後に新しい外部埋め込み先が追加されました。"
   });
-  const KINDS = Object.freeze(["form", "fetch", "xhr", "beacon", "websocket", "network"]);
-  const REASON_ORDER = Object.freeze(["form-changed", "typing-transfer", "external-redirect", "network-after-input", "form-external", "insecure"]);
-  const BLOCKING_REASONS = Object.freeze(["form-changed", "typing-transfer", "insecure"]);
+  const KINDS = Object.freeze(["form", "fetch", "xhr", "beacon", "websocket", "network", "script", "frame"]);
+  const REASON_ORDER = Object.freeze(["form-changed", "typing-transfer", "script-origin-added", "external-redirect", "network-after-input", "frame-origin-added", "form-query", "form-external", "insecure"]);
+  const BLOCKING_REASONS = Object.freeze(["form-changed", "typing-transfer", "insecure", "form-query"]);
+  const BLOCKABLE_KINDS = Object.freeze(["form", "fetch", "xhr", "beacon", "websocket"]);
   const SEVERITY_RANK = Object.freeze({FATAL: 0, CRITICAL: 1, WARNING: 2});
   function reasonSeverity(reason) {
     if (reason === "form-changed") return "FATAL";
-    if (["typing-transfer", "network-after-input", "external-redirect"].includes(reason)) return "CRITICAL";
+    if (["typing-transfer", "network-after-input", "external-redirect", "script-origin-added"].includes(reason)) return "CRITICAL";
     return "WARNING";
   }
   function incidentReasons(incident) {
@@ -57,6 +61,7 @@
     return Array.isArray(rules) && rules.some(r => r.source === source && r.destination === destination);
   }
   function analyze(meta, settings = {}) {
+    if (meta.kind === "form" && meta.method === "DIALOG") return null;
     const source = origin(meta.source);
     const destination = origin(meta.destination, source);
     const fields = categories(meta.categories);
@@ -67,14 +72,17 @@
     // Evaluate each behavior independently. HTTP must not hide a destination change or an early transfer.
     if (insecure && (meta.kind === "form" || meta.recentInput)) matches.push("insecure");
     if (meta.changed && meta.kind === "form") matches.push("form-changed");
-    if (external && meta.recentInput && !meta.userSubmitted && meta.kind !== "network" && meta.kind !== "form") matches.push("typing-transfer");
+    if (external && meta.recentInput && !meta.userSubmitted && ["fetch", "xhr", "beacon", "websocket"].includes(meta.kind)) matches.push("typing-transfer");
     if (external && meta.kind === "form") matches.push("form-external");
+    if (meta.kind === "form" && meta.method === "GET") matches.push("form-query");
+    if (external && meta.kind === "script" && meta.added === true) matches.push("script-origin-added");
+    if (external && meta.kind === "frame" && meta.added === true) matches.push("frame-origin-added");
     if (external && meta.recentInput && !meta.userSubmitted && meta.kind === "network") matches.push(meta.redirect ? "external-redirect" : "network-after-input");
     const reasons = incidentReasons({reasons: matches});
     if (!reasons.length) return null;
     const severity = incidentSeverity({reasons});
     return {source, destination, categories: fields, kind: KINDS.includes(meta.kind) ? meta.kind : "network", reason: reasons[0], reasons, severity,
-      blocked: settings.mode === "block" && reasons.some(reason => BLOCKING_REASONS.includes(reason)) && meta.attempt === true && meta.kind !== "network"};
+      blocked: settings.mode === "block" && reasons.some(reason => BLOCKING_REASONS.includes(reason)) && meta.attempt === true && BLOCKABLE_KINDS.includes(meta.kind)};
   }
   function sanitizeIncident(raw, source) {
     if (!raw || !Object.hasOwn(REASONS, raw.reason) || !KINDS.includes(raw.kind)) return null;
@@ -84,7 +92,33 @@
     const reasons = incidentReasons(raw);
     const severity = incidentSeverity({reasons});
     return {source: origin(source), destination, categories: fields, kind: raw.kind, reason: reasons[0], reasons,
-      severity, blocked: raw.blocked === true && raw.kind !== "network" && reasons.some(reason => BLOCKING_REASONS.includes(reason))};
+      severity, blocked: raw.blocked === true && BLOCKABLE_KINDS.includes(raw.kind) && reasons.some(reason => BLOCKING_REASONS.includes(reason))};
+  }
+  function formMethod(raw) {
+    const method = typeof raw === "string" ? raw.toUpperCase() : "GET";
+    return method === "POST" || method === "DIALOG" ? method : "GET";
+  }
+  function sanitizeStructure(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const count = n => Number.isFinite(n) ? Math.max(0, Math.min(10000, Math.floor(n))) : 0;
+    const rows = (items, convert) => Array.isArray(items) ? items.slice(0, 30).flatMap(item => item && typeof item === "object" ? convert(item) : []) : [];
+    return {complete: raw.complete === true, truncated: raw.truncated === true,
+      formCount: count(raw.formCount), sensitiveFormCount: count(raw.sensitiveFormCount), sensitiveFieldCount: count(raw.sensitiveFieldCount),
+      scriptCount: count(raw.scriptCount), externalScriptCount: count(raw.externalScriptCount), frameCount: count(raw.frameCount), opaqueFrameCount: count(raw.opaqueFrameCount),
+      categories: categories(raw.categories),
+      forms: rows(raw.forms, item => {
+        const destination = origin(item.destination);
+        const fields = categories(item.categories);
+        return destination && fields.length ? [{destination, method: formMethod(item.method), categories: fields, count: count(item.count)}] : [];
+      }),
+      scripts: rows(raw.scripts, item => {
+        const destination = origin(item.origin);
+        return destination ? [{origin: destination, count: count(item.count), integrityCount: Math.min(count(item.integrityCount), count(item.count))}] : [];
+      }),
+      frames: rows(raw.frames, item => {
+        const destination = origin(item.origin);
+        return destination ? [{origin: destination, count: count(item.count)}] : [];
+      })};
   }
   function sanitizeSettings(raw = {}) {
     if (!raw || typeof raw !== "object") raw = {};
@@ -94,7 +128,7 @@
       return source && destination ? [{source, destination}] : [];
     }) : []};
   }
-  const api = Object.freeze({CATEGORIES, REASONS, KINDS, SEVERITY_RANK, origin, categories, fieldCategory, allowed, analyze, reasonSeverity, incidentSeverity, incidentReasons, sanitizeIncident, sanitizeSettings});
+  const api = Object.freeze({CATEGORIES, REASONS, KINDS, SEVERITY_RANK, origin, categories, fieldCategory, formMethod, allowed, analyze, reasonSeverity, incidentSeverity, incidentReasons, sanitizeIncident, sanitizeStructure, sanitizeSettings});
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else Object.defineProperty(globalThis, "InputDefenderCore", {value: api, configurable: false, writable: false});
 })();
@@ -112,7 +146,10 @@
       "external-redirect": "外部への転送",
       "network-after-input": "入力直後の外部通信",
       "form-external": "フォームの外部送信先",
-      "insecure": "暗号化されない通信（HTTP）"
+      "insecure": "暗号化されない通信（HTTP）",
+      "form-query": "入力内容がURLに含まれるフォーム",
+      "script-origin-added": "新しい外部スクリプトの追加",
+      "frame-origin-added": "新しい外部埋め込み先の追加"
     }),
     reasons: Object.freeze({
       "form-external": "個人情報用フォームに、表示中のページとは別の送信先が指定されています。正規の決済や連携でも起こります。",
@@ -120,10 +157,129 @@
       "insecure": "個人情報用フォーム、または入力直後の通信に、暗号化されない送信先が使われています。",
       "typing-transfer": "個人情報用の欄への入力から5秒以内に、別の送信先への送信処理が呼び出されました。",
       "network-after-input": "個人情報用の欄への入力から5秒以内に、別の送信先への通信が確認されました。",
-      "external-redirect": "入力直後の通信が、別の送信先へ転送されました。"
+      "external-redirect": "入力直後の通信が、別の送信先へ転送されました。",
+      "form-query": "個人情報用フォームがGET送信に設定されています。送信すると入力内容がURLに含まれる構造です。入力値は確認していません。",
+      "script-origin-added": "個人情報用の欄があるページで、初期読み込み後に新しい外部スクリプトの参照元が追加されました。正規の広告や決済処理でも起こります。",
+      "frame-origin-added": "個人情報用の欄があるページで、初期読み込み後に新しい外部埋め込み先が追加されました。正規の決済や認証でも起こります。"
     }),
-    kinds: Object.freeze({form: "フォーム", fetch: "ページ内の送信処理", xhr: "ページ内の送信処理", beacon: "ページからの通知送信", websocket: "継続接続の送信", network: "通信の観測"})
+    kinds: Object.freeze({form: "フォーム", fetch: "ページ内の送信処理", xhr: "ページ内の送信処理", beacon: "ページからの通知送信", websocket: "継続接続の送信", network: "通信の観測", script: "スクリプトの構造変化", frame: "埋め込みの構造変化"})
   });
+})();
+
+;
+/* ISOLATED world: inspect schema attributes only, independently of page API hooks. */
+(() => {
+  "use strict";
+  const Core = globalThis.InputDefenderCore;
+  function start(send, initialSettings) {
+    const source = Core.origin(location.origin);
+    if (!source) return {configure() {}};
+    let settings = Core.sanitizeSettings(initialSettings);
+    let sealed = false, scheduled = false, signature = "";
+    const seenScripts = new Set(), seenFrames = new Set(), reported = new Set();
+    const formOrigins = new WeakMap();
+    const limit = 10000;
+    function report(meta) {
+      const incident = Core.analyze({source, ...meta, recentInput: false, attempt: false}, settings);
+      if (!incident) return;
+      const key = JSON.stringify(incident);
+      if (reported.has(key) || reported.size >= 200) return;
+      reported.add(key);
+      send({type: "incident", incident});
+    }
+    function scan() {
+      scheduled = false;
+      let truncated = false, visited = 0;
+      const nodes = selector => {
+        const result = [];
+        for (const node of document.querySelectorAll(selector)) {
+          if (++visited > limit) { truncated = true; break; }
+          result.push(node);
+        }
+        return result;
+      };
+      const forms = nodes("form"), fields = nodes("input,textarea,select");
+      const byForm = new Map(), categories = new Set();
+      let sensitiveFieldCount = 0;
+      for (const field of fields) {
+        const category = Core.fieldCategory({type: field.getAttribute("type"), autocomplete: field.getAttribute("autocomplete"), name: field.getAttribute("name"), id: field.getAttribute("id")});
+        if (!category) continue;
+        sensitiveFieldCount++;
+        categories.add(category);
+        if (field.form) {
+          if (!byForm.has(field.form)) byForm.set(field.form, new Set());
+          byForm.get(field.form).add(category);
+        }
+      }
+      const formRows = new Map();
+      function inspectForm(form, submitter = null) {
+        const fields = [...(byForm.get(form) || [])];
+        if (!fields.length) return;
+        const overridden = submitter?.getAttribute("formaction") ?? null;
+        const destination = Core.origin((overridden ?? form.getAttribute("action")) || location.href, document.baseURI);
+        const method = Core.formMethod(submitter?.getAttribute("formmethod") ?? form.getAttribute("method"));
+        const target = overridden === null ? form : submitter;
+        const changed = formOrigins.has(target) && formOrigins.get(target) !== destination;
+        if (!formOrigins.has(target)) formOrigins.set(target, destination);
+        if (!destination || method === "DIALOG") return;
+        const key = JSON.stringify([destination, method, fields]);
+        const row = formRows.get(key) || {destination, method, categories: fields, count: 0};
+        row.count++;
+        formRows.set(key, row);
+        report({kind: "form", destination, method, categories: fields, changed});
+      }
+      for (const form of forms) inspectForm(form);
+      for (const button of nodes("button[formaction],input[formaction],button[formmethod],input[formmethod]")) {
+        const type = (button.getAttribute("type") || (button.localName === "button" ? "submit" : "text")).toLowerCase();
+        if (button.form && ["submit", "image"].includes(type)) inspectForm(button.form, button);
+      }
+      const scripts = new Map(), frames = new Map();
+      let scriptCount = 0, externalScriptCount = 0, frameCount = 0, opaqueFrameCount = 0;
+      for (const script of nodes("script[src]")) {
+        scriptCount++;
+        const origin = Core.origin(script.getAttribute("src"), document.baseURI);
+        if (!origin || origin === source) continue;
+        externalScriptCount++;
+        const row = scripts.get(origin) || {origin, count: 0, integrityCount: 0};
+        row.count++;
+        if (script.getAttribute("integrity")) row.integrityCount++;
+        scripts.set(origin, row);
+        if (sealed && !seenScripts.has(origin)) report({kind: "script", destination: origin, categories: [...categories], added: true});
+        // Keep initial origins only until sensitive fields exist, so late forms still trigger a finding.
+        if (!sealed || sensitiveFieldCount) seenScripts.add(origin);
+      }
+      for (const frame of nodes("iframe")) {
+        frameCount++;
+        const origin = frame.hasAttribute("srcdoc") ? null : Core.origin(frame.getAttribute("src") || "about:blank", document.baseURI);
+        if (!origin) { opaqueFrameCount++; continue; }
+        const row = frames.get(origin) || {origin, count: 0};
+        row.count++;
+        frames.set(origin, row);
+        if (origin !== source && sealed && !seenFrames.has(origin)) report({kind: "frame", destination: origin, categories: [...categories], added: true});
+        if (!sealed || sensitiveFieldCount) seenFrames.add(origin);
+      }
+      if (formRows.size > 30 || scripts.size > 30 || frames.size > 30) truncated = true;
+      const structure = Core.sanitizeStructure({complete: document.readyState !== "loading", truncated,
+        formCount: forms.length, sensitiveFormCount: byForm.size, sensitiveFieldCount, categories: [...categories],
+        scriptCount, externalScriptCount, frameCount, opaqueFrameCount,
+        forms: [...formRows.values()], scripts: [...scripts.values()], frames: [...frames.values()]});
+      const next = JSON.stringify(structure);
+      if (next !== signature) { signature = next; send({type: "structure", structure}); }
+    }
+    function schedule() {
+      if (!scheduled) { scheduled = true; setTimeout(scan, 150); }
+    }
+    const observer = new MutationObserver(records => {
+      if (records.some(record => !record.target.closest?.("[data-input-defender-notice]"))) schedule();
+    });
+    observer.observe(document, {childList: true, subtree: true, attributes: true,
+      attributeFilter: ["action", "formaction", "method", "formmethod", "form", "type", "autocomplete", "name", "id", "src", "srcdoc", "integrity", "href"]});
+    scan();
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => { scan(); sealed = true; }, {once: true});
+    else sealed = true;
+    return {configure(next) { settings = Core.sanitizeSettings(next); reported.clear(); schedule(); }};
+  }
+  Object.defineProperty(globalThis, "InputDefenderStructure", {value: Object.freeze({start})});
 })();
 
 ;
@@ -140,7 +296,13 @@
   let budgetStart = Date.now(), messageCount = 0;
   const source = Core.origin(location.origin);
   const send = message => chrome.runtime.sendMessage(message).catch(() => null);
-  function configure(settings) { window.postMessage({channel, type: "config", settings: Core.sanitizeSettings(settings)}, "*"); }
+  let structure;
+  function configure(settings) {
+    const config = Core.sanitizeSettings(settings);
+    if (structure) structure.configure(config);
+    else structure = globalThis.InputDefenderStructure.start(send, config);
+    window.postMessage({channel, type: "config", settings: config}, "*");
+  }
   function ensureStack() {
     if (stack?.isConnected) return;
     stack = document.createElement("div");
@@ -300,4 +462,6 @@
     }
   });
   window.postMessage({channel, type: "ping"}, "*");
+  // Structure analysis must start even if the page suppresses MAIN-world messages.
+  send({type: "config"}).then(response => { if (response && !structure) configure(response.settings); });
 })();
