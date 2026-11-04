@@ -30,43 +30,17 @@
 
 ## ロジックの構成図
 
-ページ側の送信前監視と、Chrome側の通信観測を組み合わせます。図の矢印で渡すのは、欄の種類・操作タイミング・送信先・検知理由などのメタデータだけです。
+ページ・拡張・ブラウザAPI・保存領域の配置と接続を示します。拡張内で扱うのは、欄の種類・操作タイミング・送信先・検知理由などのメタデータだけです。
 
-```mermaid
-flowchart TB
-    subgraph page["サイト側：MAIN world"]
-        fields["入力欄の属性・入力イベント<br/>値・入力文字は取得しない"]
-        api["送信API・フォーム送信先<br/>fetch / XHR / Beacon / WebSocket"]
-        monitor["monitor.js + core.js<br/>入力の種類・タイミングと<br/>送信先から複数の理由を判定"]
-        decision{"停止モードかつ<br/>対応する停止条件に該当？"}
-        blocked["対象の送信処理を停止"]
-        passed["元のAPIを実行<br/>本文の検査・複製はしない"]
-        fields --> monitor
-        api --> monitor
-        monitor --> decision
-        decision -->|はい| blocked
-        decision -->|いいえ| passed
-    end
+![Input Defenderのシステム構成図。Chrome内のページ、ISOLATED world、Service worker、表示・保存の接続関係](docs/architecture.svg)
 
-    bridge["bridge.js：ISOLATED world<br/>固定スキーマの<br/>メタデータに縮小"]
-    browser["Chrome webRequest<br/>送信先・種別・リダイレクトの観測<br/>通信本文・ヘッダーは取得しない"]
-    background["background.js + core.js<br/>送信元・入力タイミングを照合<br/>通知除外・重複抑制・記録"]
-    settings[("storage.local<br/>監視モード・通知除外")]
-    session[("storage.session<br/>検知記録・入力タイミング")]
-    notifications["ページ内通知：bridge.js<br/>種類ごとに重要度順で積み重ね"]
-    popup["popup.js<br/>理由・深刻度・停止結果を表示<br/>設定・通知除外・記録の削除"]
-
-    monitor -->|入力イベント・検知結果| bridge
-    bridge -->|メタデータのみ| background
-    browser --> background
-    settings --> background
-    background --> session
-    background -->|通知データ| notifications
-    session -->|バックグラウンド経由で閲覧| popup
-
-    classDef neutral fill:#f5f7f3,stroke:#a8b9a7,color:#273d32
-    class fields,api,monitor,bridge,browser,background,settings,session,popup,blocked,passed,notifications neutral
-```
+| 領域・部品 | 役割 |
+| --- | --- |
+| サイト側：`monitor.js` + `core.js` | 入力欄の属性・操作タイミング・送信先から複数の理由を判定。対応する送信は任意で停止 |
+| 橋渡し：`bridge.js` | メッセージを固定スキーマに縮小し、未知の項目やURLのパス・クエリを除外。ページ内通知も描画 |
+| Chrome：`webRequest` | 画像・Workerなどを含む通信の送信先・種別・転送を観測。本文やヘッダーは取得しない |
+| バックグラウンド：`background.js` + `core.js` | 送信元と入力タイミングの照合、通知除外、重複抑制、検知記録の管理 |
+| 表示・保存：`popup.js` / `storage` | 拡張アイコンから理由・深刻度・停止結果を確認。記録はメモリ内、設定は端末内に保存 |
 
 | 深刻度 | 表示色 | 判定する挙動 |
 | --- | --- | --- |
@@ -78,7 +52,7 @@ flowchart TB
 
 **停止できるのはページ側で監視できた送信処理だけ**です。`webRequest` は送信先などの観測に使い、本文を見たり、そこから通信を遮断したりはしません。通知除外は元ページと送信先のオリジンの完全一致で適用します。深刻度の名前だけで停止を決めず、既存の停止条件と監視モードで判定します。
 
-設定の変更は `background.js → bridge.js → monitor.js` の順に反映します。図では検知の流れを追いやすくするため、この逆向きの設定経路は省略しています。未知のメッセージ項目やURLのパス・クエリは拡張内への受け渡し時に除外し、メモリ内の検知記録は最大100件／タブです。
+設定の変更は `background.js → bridge.js → monitor.js` の順に反映します。ポップアップもバックグラウンドを経由して記録・設定にアクセスします。メモリ内の検知記録は最大100件／タブです。構成図の元データは編集可能な [SVG](docs/architecture.svg) として管理しています。
 
 ## 操作
 

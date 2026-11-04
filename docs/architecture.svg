@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="780" viewBox="0 0 1280 780" role="img" aria-labelledby="title description">
+  <title id="title">Input Defender システム構成図</title>
+  <desc id="description">ユーザー端末のChrome内に、サイトのページ、ISOLATED worldの橋渡し、Service workerの判定処理、通知・ポップアップ・保存領域を配置。拡張内では入力値ではなくメタデータだけを渡す。送信前のAPI監視とChromeの通信観測を併用する。</desc>
+  <defs>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,'Yu Gothic UI','Hiragino Kaku Gothic ProN',sans-serif;fill:#263c32}
+      .heading{font-size:27px;font-weight:700}.subtitle{font-size:17px;fill:#586b60}.zone{font-size:20px;font-weight:650}.node-title{font-size:20px;font-weight:650}.file{font-size:16px;fill:#596f61}.detail{font-size:17px;fill:#43594b}.note{font-size:16px;fill:#586b60}.wire-label{font-size:15px;fill:#4f6658}.wire{fill:none;stroke:#72877b;stroke-width:2.2;stroke-linejoin:round;marker-end:url(#arrow)}.node{fill:#fff;stroke:#adbdaf;stroke-width:1.5}.icon{fill:none;stroke:#3c6d54;stroke-width:2.3;stroke-linecap:round;stroke-linejoin:round}.warning{fill:#785200}.critical{fill:#a32929}.fatal{fill:#6a268f}.level{font-size:13px;font-weight:750}
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#72877b"/></marker>
+    <symbol id="window" viewBox="0 0 40 40"><rect x="3" y="5" width="34" height="29" rx="3"/><path d="M3 13H37M9 9H10M15 9H16M10 20H29M10 26H24"/></symbol>
+    <symbol id="shield" viewBox="0 0 40 40"><path d="M20 3L34 9V20C34 29 27 34 20 38C13 34 6 29 6 20V9Z"/><path d="M13 20L18 25L28 14"/></symbol>
+    <symbol id="bridge" viewBox="0 0 40 40"><rect x="2" y="11" width="9" height="18" rx="2"/><rect x="29" y="11" width="9" height="18" rx="2"/><path d="M12 16H27M23 12L27 16L23 20M28 25H13M17 21L13 25L17 29"/></symbol>
+    <symbol id="network" viewBox="0 0 40 40"><circle cx="20" cy="9" r="5"/><circle cx="8" cy="31" r="5"/><circle cx="32" cy="31" r="5"/><path d="M20 14V21M8 26V21H32V26"/></symbol>
+    <symbol id="worker" viewBox="0 0 40 40"><rect x="7" y="7" width="26" height="26" rx="4"/><rect x="14" y="14" width="12" height="12" rx="1"/><path d="M14 2V7M26 2V7M14 33V38M26 33V38M2 14H7M2 26H7M33 14H38M33 26H38"/></symbol>
+    <symbol id="bell" viewBox="0 0 40 40"><path d="M9 29H31L28 24V15C28 4 12 4 12 15V24ZM16 33C17 38 23 38 24 33M20 3V7"/></symbol>
+  </defs>
+
+  <rect width="1280" height="780" fill="#fff"/>
+  <text x="32" y="43" class="heading">Input Defender｜システム構成</text>
+  <text x="32" y="73" class="subtitle">ページ側とブラウザ側で挙動を監視し、拡張内ではメタデータだけを受け渡す</text>
+
+  <rect x="24" y="100" width="1232" height="590" rx="16" fill="#f8faf7" stroke="#6f8375" stroke-width="2"/>
+  <rect x="45" y="88" width="310" height="26" fill="#fff"/>
+  <text x="54" y="108" class="zone">ユーザーの端末：Chrome</text>
+
+  <rect x="44" y="138" width="350" height="526" rx="10" fill="#fff" stroke="#a5b5a9" stroke-width="1.5"/>
+  <text x="65" y="172" class="zone">表示中のサイト</text>
+  <text x="65" y="197" class="file">MAIN world</text>
+  <rect x="420" y="138" width="812" height="526" rx="10" fill="#f3f8f4" stroke="#638672" stroke-width="1.5" stroke-dasharray="8 5"/>
+  <text x="442" y="172" class="zone">Chrome拡張機能</text>
+  <text x="455" y="211" class="file">ISOLATED world</text>
+  <text x="716" y="211" class="file">Service worker</text>
+  <text x="1014" y="211" class="file">表示・保存</text>
+  <path d="M679 226V640M977 226V640" fill="none" stroke="#cedbd0" stroke-dasharray="4 5"/>
+
+  <!-- Page: schema and timing enter the monitor, without reading field values. -->
+  <rect x="74" y="240" width="290" height="138" rx="7" class="node"/>
+  <use href="#window" x="91" y="254" width="36" height="36" class="icon"/>
+  <text x="141" y="278" class="node-title">フォームと送信処理</text>
+  <text x="92" y="318" class="detail">入力欄の属性・入力イベント</text>
+  <text x="92" y="346" class="detail">送信API・フォーム送信先</text>
+  <path d="M219 378V453" class="wire"/>
+  <text x="232" y="411" class="wire-label">属性・操作のみ</text>
+
+  <rect x="74" y="455" width="290" height="151" rx="7" class="node"/>
+  <use href="#shield" x="91" y="469" width="36" height="36" class="icon"/>
+  <text x="141" y="493" class="node-title">送信前の監視・判定</text>
+  <text x="92" y="533" class="file">monitor.js + core.js</text>
+  <text x="92" y="565" class="detail">対応する送信だけ任意で停止</text>
+  <text x="92" y="590" class="note">値・本文の検査や複製はしない</text>
+
+  <!-- Bridge and its page-visible notification surface. -->
+  <rect x="452" y="455" width="194" height="151" rx="7" class="node"/>
+  <use href="#bridge" x="468" y="469" width="34" height="34" class="icon"/>
+  <text x="514" y="493" class="node-title">橋渡し</text>
+  <text x="470" y="533" class="file">bridge.js</text>
+  <text x="470" y="562" class="detail">項目を形式検証</text>
+  <text x="470" y="588" class="detail">未知の項目を除外</text>
+  <path d="M364 526H450" class="wire"/>
+  <rect x="361" y="494" width="88" height="23" fill="#f8faf7"/>
+  <text x="366" y="511" class="wire-label">メタデータ</text>
+  <path d="M646 526H712" class="wire"/>
+
+  <rect x="452" y="240" width="194" height="145" rx="7" class="node"/>
+  <use href="#bell" x="468" y="254" width="34" height="34" class="icon"/>
+  <text x="514" y="278" class="node-title">ページ内通知</text>
+  <text x="470" y="315" class="detail">種類別に積み重ね</text>
+  <rect x="469" y="332" width="58" height="24" rx="3" fill="#f1e6fa"/><text x="477" y="349" class="level fatal">FATAL</text>
+  <rect x="534" y="332" width="95" height="24" rx="3" fill="#fde8e8"/><text x="540" y="349" class="level critical">CRITICAL</text>
+  <text x="470" y="376" class="level warning">WARNING</text>
+  <path d="M714 487H666V308H648" class="wire"/>
+  <text x="674" y="415" class="wire-label">通知</text>
+
+  <!-- Chrome API supplies metadata to the service worker; no request body option. -->
+  <rect x="714" y="240" width="230" height="145" rx="7" class="node"/>
+  <use href="#network" x="730" y="254" width="34" height="34" class="icon"/>
+  <text x="778" y="278" class="node-title">通信の観測</text>
+  <text x="732" y="315" class="file">Chrome webRequest</text>
+  <text x="732" y="344" class="detail">送信先・種別・転送</text>
+  <text x="732" y="371" class="note">本文・ヘッダーは取得しない</text>
+  <path d="M829 385V453" class="wire"/>
+  <text x="842" y="418" class="wire-label">通信メタデータ</text>
+
+  <rect x="714" y="455" width="230" height="151" rx="7" class="node"/>
+  <use href="#worker" x="730" y="469" width="34" height="34" class="icon"/>
+  <text x="778" y="493" class="node-title">照合・集約</text>
+  <text x="732" y="531" class="file">background.js + core.js</text>
+  <text x="732" y="560" class="detail">入力時刻・通知除外を照合</text>
+  <text x="732" y="588" class="detail">複数理由・深刻度を記録</text>
+
+  <!-- Storage cylinders and popup: all local, worker-mediated reads/writes. -->
+  <path d="M1010 385V451C1010 474 1200 474 1200 451V385Z" fill="#fff" stroke="#adbdaf" stroke-width="1.5"/>
+  <ellipse cx="1105" cy="385" rx="95" ry="15" fill="#edf4ec" stroke="#adbdaf" stroke-width="1.5"/>
+  <text x="1105" y="416" text-anchor="middle" class="file">storage.session</text>
+  <text x="1105" y="443" text-anchor="middle" class="detail">メモリ内の検知記録</text>
+  <path d="M944 492H988V424H1008" class="wire"/>
+
+  <rect x="1010" y="240" width="190" height="105" rx="7" class="node"/>
+  <use href="#window" x="1025" y="251" width="32" height="32" class="icon"/>
+  <text x="1070" y="276" class="node-title">ポップアップ</text>
+  <text x="1028" y="311" class="file">popup.js</text>
+  <text x="1028" y="334" class="note">理由・設定・記録の削除</text>
+  <path d="M1105 368V347" class="wire"/>
+  <text x="1120" y="362" class="wire-label">背景経由</text>
+
+  <path d="M1010 529V591C1010 614 1200 614 1200 591V529Z" fill="#fff" stroke="#adbdaf" stroke-width="1.5"/>
+  <ellipse cx="1105" cy="529" rx="95" ry="15" fill="#edf4ec" stroke="#adbdaf" stroke-width="1.5"/>
+  <text x="1105" y="561" text-anchor="middle" class="file">storage.local</text>
+  <text x="1105" y="588" text-anchor="middle" class="detail">監視モード・通知除外</text>
+  <path d="M1010 562H946" class="wire"/>
+
+  <text x="54" y="682" class="note">設定の反映：background.js → bridge.js → monitor.js</text>
+  <text x="34" y="726" class="detail">取得しない情報：入力値・入力文字・通信本文・Cookie・通信ヘッダー</text>
+  <text x="34" y="756" class="subtitle">送信先はオリジンだけに縮小。外部判定サービスへの接続やテレメトリーはありません。</text>
+</svg>
