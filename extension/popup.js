@@ -1,6 +1,7 @@
 "use strict";
 const Core = globalThis.InputDefenderCore;
 const UI = globalThis.InputDefenderUI;
+const safari = Boolean(chrome.runtime.getManifest().browser_specific_settings?.safari);
 const $ = id => document.getElementById(id);
 let tabId;
 let config = {mode: "observe", allowlist: []};
@@ -11,6 +12,10 @@ let loaded = false;
 let renderedEvents = "";
 let renderedRules = "";
 let renderedStructure = "";
+if (safari) {
+  document.documentElement.classList.add("safari-popup");
+  document.getElementById("platform-note").hidden = false;
+}
 // An extension tab can resize; Chrome's actual action popup needs intrinsic dimensions.
 chrome.tabs.getCurrent().then(tab => {
   if (!tab) document.documentElement.classList.add("native-popup");
@@ -228,6 +233,9 @@ async function refresh() {
     ? "通常のWebページを開き、再読み込みしてください。Chromeの設定画面などは監視できません。"
     : currentEvents.length ? "身に覚えのない送信先がないか、検知記録を確認してください。"
     : "操作は不要です。不審な動きがあれば警告します。安全を保証する表示ではありません。";
+  if (state.monitoring && !state.frames?.["0"]?.hooksReady) {
+    $("status-note").textContent = "送信API監視の起動をまだ確認できていません。構造情報を確認し、ページを再読み込みしてください。";
+  }
   renderEvents();
   renderStructure(state.frames);
   syncControls();

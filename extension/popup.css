@@ -12,6 +12,10 @@
 body { margin: 0; width: 440px; max-width: 100vw; height: 600px; max-height: 100dvh; display: flex; flex-direction: column; }
 /* Browser action popups size themselves from content; viewport caps would lock their initial tiny size. */
 .native-popup body { width: 440px; max-width: none; }
+.safari-popup.native-popup body { width: 440px; max-width: 100vw; }
+.safari-popup button, .safari-popup select { min-height: 44px; }
+.safari-popup .panel-nav { padding-bottom: env(safe-area-inset-bottom, 0px); }
+#platform-note { margin-top: 5px; }
 button, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled, select:disabled { cursor: not-allowed; color: #758078; background: #edf0ed; border-color: #d7ddd7; }

@@ -300,6 +300,7 @@
       connected = true;
       for (const item of outbox.splice(0)) emit(item.type, item.payload);
       scan(document);
+      emit("configured", {});
     } else if (event.data.type === "ping") emit("ready", {});
   });
   scan(document);

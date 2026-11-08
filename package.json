@@ -1,14 +1,18 @@
 {
   "name": "input-defender",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Chrome extension that detects suspicious site behavior without reading input values or request bodies.",
   "scripts": {
     "build": "node scripts/build.cjs",
+    "build:ios": "node scripts/apple.cjs",
+    "build:macos": "node scripts/apple.cjs --macos",
     "pretest": "node scripts/build.cjs",
     "pretest:browser": "node scripts/build.cjs",
-    "test": "node --test tests/core.test.cjs tests/privacy.test.cjs",
+    "test": "node --test tests/core.test.cjs tests/privacy.test.cjs tests/safari.test.cjs",
     "test:browser": "playwright test",
+    "test:ios": "node scripts/apple.cjs --test",
+    "test:macos": "node scripts/apple.cjs --macos --test",
     "demo": "node fixtures/server.cjs",
     "package": "node scripts/build.cjs && node scripts/package.cjs"
   },

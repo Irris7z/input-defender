@@ -156,6 +156,8 @@
     if (event.data.type === "ready") {
       const response = await send({type: "config"});
       if (response) configure(response.settings);
+    } else if (event.data.type === "configured") {
+      await send({type: "hooks-ready"});
     } else if (event.data.type === "activity") {
       if (Date.now() - lastActivity < 250) return;
       const categories = Core.categories(event.data.categories);
