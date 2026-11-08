@@ -1,10 +1,11 @@
 "use strict";
 importScripts("core.js");
 const Core = globalThis.InputDefenderCore;
+const safari = Boolean(chrome.runtime.getManifest().browser_specific_settings?.safari);
 // All access to storage goes through this worker. No sync storage or external services.
 const initialized = Promise.all([
-  chrome.storage.local.setAccessLevel({accessLevel: "TRUSTED_CONTEXTS"}),
-  chrome.storage.session.setAccessLevel({accessLevel: "TRUSTED_CONTEXTS"})
+  chrome.storage.local.setAccessLevel?.({accessLevel: "TRUSTED_CONTEXTS"}),
+  chrome.storage.session.setAccessLevel?.({accessLevel: "TRUSTED_CONTEXTS"})
 ]);
 let queue = Promise.resolve();
 const serialize = task => {
@@ -25,9 +26,9 @@ async function stateFor(tabId) {
 async function save(tabId, state) {
   await chrome.storage.session.set({[tabKey(tabId)]: state});
   const count = state.events.length;
-  await chrome.action.setBadgeText({tabId, text: count ? String(count) : ""});
+  await chrome.action.setBadgeText?.({tabId, text: count ? String(count) : ""});
   const level = state.events.map(Core.incidentSeverity).sort((a, b) => Core.SEVERITY_RANK[a] - Core.SEVERITY_RANK[b])[0] || "WARNING";
-  await chrome.action.setBadgeBackgroundColor({tabId, color: {WARNING: "#986300", CRITICAL: "#b63232", FATAL: "#7634a0"}[level]});
+  await chrome.action.setBadgeBackgroundColor?.({tabId, color: {WARNING: "#986300", CRITICAL: "#b63232", FATAL: "#7634a0"}[level]});
 }
 async function record(tabId, state, incident, config) {
   if (Core.allowed(config.allowlist, incident.source, incident.destination)) return;
@@ -77,6 +78,12 @@ async function handle(message, sender) {
     return {settings: config};
   }
   const frame = state.frames[frameId] || {source, lastInput: 0, lastSubmit: 0, categories: []};
+  if (message.type === "hooks-ready") {
+    frame.hooksReady = true;
+    state.frames[frameId] = frame;
+    await chrome.storage.session.set({[tabKey(tabId)]: state});
+    return {ok: true};
+  }
   if (message.type === "structure") {
     const structure = Core.sanitizeStructure(message.structure);
     if (structure) {
@@ -134,8 +141,11 @@ function observeRequest(details, redirect = false) {
     if (incident) await record(tabId, state, incident, config);
   }).catch(() => {});
 }
-chrome.webRequest.onBeforeRequest.addListener(details => observeRequest(details), {urls: ["<all_urls>"]});
-chrome.webRequest.onBeforeRedirect.addListener(details => observeRequest(details, true), {urls: ["<all_urls>"]});
+// iOS requires a nonpersistent background and does not support these listeners.
+if (!safari) {
+  chrome.webRequest.onBeforeRequest.addListener(details => observeRequest(details), {urls: ["<all_urls>"]});
+  chrome.webRequest.onBeforeRedirect.addListener(details => observeRequest(details, true), {urls: ["<all_urls>"]});
+}
 chrome.tabs.onRemoved.addListener(tabId => {
   serialize(() => chrome.storage.session.remove(tabKey(tabId))).catch(() => {});
 });

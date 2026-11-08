@@ -3,3 +3,8 @@ test-results/
 playwright-report/
 .DS_Store
 artifacts/
+**/xcuserdata/
+**/*.xcuserstate
+**/DerivedData/
+**/*.xcarchive/
+**/*.ipa

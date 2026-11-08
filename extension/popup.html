@@ -10,13 +10,13 @@
   <script defer src="popup.js"></script>
 </head>
 <body>
-  <header class="app-header"><div class="brand"><img src="icons/48.png" width="24" height="24" alt=""><h1>Input Defender</h1></div><span class="version">v0.2.0</span></header>
+  <header class="app-header"><div class="brand"><img src="icons/48.png" width="24" height="24" alt=""><h1>Input Defender</h1></div><span class="version">v0.3.0</span></header>
   <section class="page-context" aria-label="現在のページ">
     <p id="site" class="origin">ページを確認中</p>
     <div class="status" aria-live="polite"><span class="status-symbol" aria-hidden="true">●</span><h2 id="status-label">監視状態を確認中</h2></div>
     <p id="status-note">しばらくお待ちください。</p>
   </section>
-  <section class="mode-panel" aria-label="監視の設定"><div class="mode-row"><label for="mode">監視モード</label><select id="mode" aria-describedby="mode-note" disabled><option value="observe">検知のみ（推奨）</option><option value="block">要注意の送信を停止</option></select></div><p id="mode-note">設定を読み込み中です。</p></section>
+  <section class="mode-panel" aria-label="監視の設定"><div class="mode-row"><label for="mode">監視モード</label><select id="mode" aria-describedby="mode-note" disabled><option value="observe">検知のみ（推奨）</option><option value="block">要注意の送信を停止</option></select></div><p id="mode-note">設定を読み込み中です。</p><p id="platform-note" class="caption" hidden>Safari版：フォーム・構造・対応する送信APIを監視。画像・Worker・リダイレクトなど、ブラウザ全体の通信観測は対象外です。</p></section>
   <main id="workspace">
     <section id="records-panel" class="panel" aria-labelledby="records-tab" role="tabpanel">
       <div class="section-title"><h2>このタブの記録 <span id="event-count">0</span><span class="count-unit">件</span></h2><button id="clear" class="button quiet" disabled title="削除する記録はありません">記録を削除…</button></div>
