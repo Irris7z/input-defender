@@ -58,12 +58,16 @@ final class SafariEngineTests: XCTestCase, WKScriptMessageHandler {
         #endif
         view.load(URLRequest(url: URL(string: "http://127.0.0.1:4173/structure-lab.html")!))
     }
-    private func waitFor(_ predicate: () -> Bool) async throws {
-        for _ in 0..<150 {
+    private func waitFor(_ description: String, timeout: Duration = .seconds(15), _ predicate: () -> Bool) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
             if predicate() { return }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
-        XCTFail("Expected sanitized metadata was not observed in WebKit")
+        let kinds = messages.compactMap { $0["type"] as? String }
+        let failure = "Timed out waiting for \(description). Metadata types: \(kinds)"
+        throw NSError(domain: "InputDefender.Tests", code: 1, userInfo: [NSLocalizedDescriptionKey: failure])
     }
     private func hasReason(_ reason: String, blocked: Bool? = nil) -> Bool {
         messages.contains { message in
@@ -82,27 +86,29 @@ final class SafariEngineTests: XCTestCase, WKScriptMessageHandler {
     }
     func testEmptyFormAndStructuralChangesWithoutReadingValues() async throws {
         try prepare()
-        try await waitFor { self.hasReason("form-query") }
-        try await waitFor { self.messages.contains { ($0["structure"] as? [String: Any])?["complete"] as? Bool == true } }
+        // The first WebContent process on a fresh CI simulator can take over a minute.
+        // Later structural changes retain their shorter, independent timeout.
+        try await waitFor("initial form analysis", timeout: .seconds(120)) { self.hasReason("form-query") }
+        try await waitFor("initial DOM completion") { self.messages.contains { ($0["structure"] as? [String: Any])?["complete"] as? Bool == true } }
         _ = try await webView!.evaluateJavaScript("""
         Object.defineProperty(HTMLInputElement.prototype, 'value', {get(){throw new Error('Value read');}});
         document.getElementById('query-form').setAttribute('action','http://127.0.0.1:4174/PRIVATE?name=PRIVATE');
         document.getElementById('add-script').click();
         document.getElementById('add-frame').click(); true;
         """)
-        try await waitFor { self.hasReason("form-changed") && self.hasReason("script-origin-added") && self.hasReason("frame-origin-added") }
+        try await waitFor("form, script and frame changes") { self.hasReason("form-changed") && self.hasReason("script-origin-added") && self.hasReason("frame-origin-added") }
         let encoded = try JSONSerialization.data(withJSONObject: messages)
         XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("PRIVATE"))
     }
     func testStrictModeStopsNativeFormSubmission() async throws {
         try prepare(mode: "block")
-        try await waitFor { self.hasReason("form-query") }
-        try await waitFor { self.messages.contains { $0["type"] as? String == "hooks-ready" } }
+        try await waitFor("initial form analysis", timeout: .seconds(120)) { self.hasReason("form-query") }
+        try await waitFor("page hook configuration") { self.messages.contains { $0["type"] as? String == "hooks-ready" } }
         let result = try await webView!.evaluateJavaScript("""
         (()=>{try{document.getElementById('query-form').submit();return 'sent';}catch(error){return error.name;}})();
         """) as? String
         XCTAssertEqual(result, "SecurityError")
-        try await waitFor { self.hasReason("form-query", blocked: true) }
+        try await waitFor("blocked form incident") { self.hasReason("form-query", blocked: true) }
     }
     #if os(macOS)
     func testMacSetupWindowLayout() throws {

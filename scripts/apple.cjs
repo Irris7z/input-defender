@@ -24,6 +24,9 @@ async function main() {
     const id = process.env.IOS_SIMULATOR_UDID || candidates[0]?.udid;
     if (!id) throw new Error("iOS 26以降のiPhone SimulatorをXcodeからインストールしてください。");
     destination = `platform=iOS Simulator,id=${id}`;
+    // Complete first boot before starting the test host and its WebKit processes.
+    const boot = spawnSync("xcrun", ["simctl", "bootstatus", id, "-b"], {stdio: "inherit"});
+    if (boot.status !== 0) throw new Error("iOS Simulatorの起動が完了しませんでした。");
   }
   if (testing) {
     fixture = spawn(process.execPath, ["fixtures/server.cjs"], {stdio: ["ignore", "pipe", "pipe"]});

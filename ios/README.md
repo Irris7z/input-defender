@@ -46,6 +46,8 @@ npm run test:ios
 
 ネイティブ検知テストのソースは `tests/apple/SafariEngineTests.swift` としてMac版と共有しています。ビルド用の共通スクリプトは `scripts/apple.cjs` です。
 
+シミュレーターの起動完了を待ってからテストを開始します。新規CI環境では最初のWebKitプロセス起動に時間がかかるため、初期フォーム解析だけ最大120秒、以後の構造変更や停止記録は最大15秒を期限にします。失敗時は待っていた処理名を示し、後続の操作を中止します。
+
 `test:ios` はiOS 26以降のインストール済みiPhone Simulatorを選び、端末内の検証サーバーを起動して終了時に停止します。4173 / 4174番ポートを使う他のデモサーバーは、先に終了してください。端末を指定する場合は `IOS_SIMULATOR_UDID=<UDID> npm run test:ios` を使います。実機向けの署名なしコンパイル確認は `npm run build:ios -- --device` です。
 
 自動検証は次を分けて行います。
